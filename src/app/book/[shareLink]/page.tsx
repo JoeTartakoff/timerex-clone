@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -27,6 +27,14 @@ interface Booking {
   end_time: string
 }
 
+interface User {
+  id: string
+  email?: string
+  user_metadata?: {
+    full_name?: string
+  }
+}
+
 export default function BookingPage() {
   const params = useParams()
   const shareLink = params.shareLink as string
@@ -41,97 +49,49 @@ export default function BookingPage() {
     email: '',
   })
   const [submitting, setSubmitting] = useState(false)
-  const [guestUser, setGuestUser] = useState<any>(null)
+  const [guestUser, setGuestUser] = useState<User | null>(null)
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
 
-  useEffect(() => {
-    console.log('=== useEffect triggered ===')
-    console.log('shareLink:', shareLink)
-    
-    const init = async () => {
-      try {
-        await checkGuestUser()
-        await fetchScheduleData()
-      } catch (error) {
-        console.error('Init error:', error)
-        setLoading(false)
-      }
-    }
-    
-    init()
-  }, [])
-
-useEffect(() => {
-  if (!guestUser) return
-
-  const saveAndReload = async () => {
-    console.log('=== Guest Login Detected ===')
-    console.log('Guest user ID:', guestUser.id)
-    console.log('Guest email:', guestUser.email)
-    
-    // 게스트 정보 자동 입력
-    setGuestInfo({
-      name: guestUser.user_metadata?.full_name || guestUser.email?.split('@')[0] || '',
-      email: guestUser.email || '',
-    })
-    
-    try {
-      // 세션에서 토큰 가져오기
-      const { data: { session } } = await supabase.auth.getSession()
-      console.log('Session check:', {
-        hasSession: !!session,
-        hasProviderToken: !!session?.provider_token,
-        hasRefreshToken: !!session?.provider_refresh_token
-      })
-      
-      if (session?.provider_token && session?.provider_refresh_token) {
-        // 토큰 저장
-        const expiresAt = new Date(Date.now() + (session.expires_in || 3600) * 1000).toISOString()
-        
-        const { error: tokenError } = await supabase
-          .from('user_tokens')
-          .upsert({
-            user_id: guestUser.id,
-            access_token: session.provider_token,
-            refresh_token: session.provider_refresh_token,
-            expires_at: expiresAt,
-            updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'user_id'
-          })
-
-        if (tokenError) {
-          console.error('Failed to save guest tokens:', tokenError)
-        } else {
-          console.log('Guest tokens saved successfully')
-        }
-      }
-
-      // 게스트 ID를 명시적으로 전달하여 슬롯 재로드
-      console.log('Reloading slots with guest ID:', guestUser.id)
-      await fetchScheduleData(guestUser.id)
-    } catch (error) {
-      console.error('Error in guest login handler:', error)
-    }
-  }
-
-  saveAndReload()
-}, [guestUser?.id])
-
-  const checkGuestUser = async () => {
+  const checkGuestUser = useCallback(async () => {
     try {
       console.log('Checking guest user...')
       const { data: { user }, error } = await supabase.auth.getUser()
       console.log('Guest user result:', { user: user?.email, error })
       if (user) {
-        setGuestUser(user)
+        setGuestUser(user as User)
       }
     } catch (error) {
       console.error('Error checking guest user:', error)
     }
-  }
+  }, [])
 
-  const fetchScheduleData = async (guestUserId?: string) => {
+  // 저장된 슬롯 로드 (폴백용)
+  const loadStaticSlots = useCallback(async (scheduleId: string) => {
+    // 가능한 시간대 가져오기
+    const { data: slotsData, error: slotsError } = await supabase
+      .from('availability_slots')
+      .select('*')
+      .eq('schedule_id', scheduleId)
+      .order('date', { ascending: true })
+      .order('start_time', { ascending: true })
+
+    if (slotsError) throw slotsError
+
+    setAvailableSlots(slotsData || [])
+
+    // 이미 예약된 시간대 가져오기
+    const { data: bookingsData, error: bookingsError } = await supabase
+      .from('bookings')
+      .select('booking_date, start_time, end_time')
+      .eq('schedule_id', scheduleId)
+      .eq('status', 'confirmed')
+
+    if (bookingsError) throw bookingsError
+
+    setBookings(bookingsData || [])
+  }, [])
+
+  const fetchScheduleData = useCallback(async (guestUserId?: string) => {
     try {
       console.log('=== fetchScheduleData START ===')
       console.log('shareLink:', shareLink)
@@ -188,7 +148,7 @@ useEffect(() => {
 
         if (result.success && result.slots) {
           // 실시간 슬롯 사용
-          const slotsWithId = result.slots.map((slot: any, index: number) => ({
+          const slotsWithId = result.slots.map((slot: { date: string; startTime: string; endTime: string }, index: number) => ({
             id: `${slot.date}-${slot.startTime}-${index}`,
             date: slot.date,
             start_time: slot.startTime,
@@ -215,33 +175,81 @@ useEffect(() => {
       setLoading(false)
       setIsLoadingSlots(false)
     }
-  }
+  }, [shareLink, guestUser?.id, loadStaticSlots])
 
-  // 저장된 슬롯 로드 (폴백용)
-  const loadStaticSlots = async (scheduleId: string) => {
-    // 가능한 시간대 가져오기
-    const { data: slotsData, error: slotsError } = await supabase
-      .from('availability_slots')
-      .select('*')
-      .eq('schedule_id', scheduleId)
-      .order('date', { ascending: true })
-      .order('start_time', { ascending: true })
+  useEffect(() => {
+    console.log('=== useEffect triggered ===')
+    console.log('shareLink:', shareLink)
+    
+    const init = async () => {
+      try {
+        await checkGuestUser()
+        await fetchScheduleData()
+      } catch (error) {
+        console.error('Init error:', error)
+        setLoading(false)
+      }
+    }
+    
+    init()
+  }, [shareLink, checkGuestUser, fetchScheduleData])
 
-    if (slotsError) throw slotsError
+  useEffect(() => {
+    if (!guestUser) return
 
-    setAvailableSlots(slotsData || [])
+    const saveAndReload = async () => {
+      console.log('=== Guest Login Detected ===')
+      console.log('Guest user ID:', guestUser.id)
+      console.log('Guest email:', guestUser.email)
+      
+      // 게스트 정보 자동 입력
+      setGuestInfo({
+        name: guestUser.user_metadata?.full_name || guestUser.email?.split('@')[0] || '',
+        email: guestUser.email || '',
+      })
+      
+      try {
+        // 세션에서 토큰 가져오기
+        const { data: { session } } = await supabase.auth.getSession()
+        console.log('Session check:', {
+          hasSession: !!session,
+          hasProviderToken: !!session?.provider_token,
+          hasRefreshToken: !!session?.provider_refresh_token
+        })
+        
+        if (session?.provider_token && session?.provider_refresh_token) {
+          // 토큰 저장
+          const expiresAt = new Date(Date.now() + (session.expires_in || 3600) * 1000).toISOString()
+          
+          const { error: tokenError } = await supabase
+            .from('user_tokens')
+            .upsert({
+              user_id: guestUser.id,
+              access_token: session.provider_token,
+              refresh_token: session.provider_refresh_token,
+              expires_at: expiresAt,
+              updated_at: new Date().toISOString(),
+            }, {
+              onConflict: 'user_id'
+            })
 
-    // 이미 예약된 시간대 가져오기
-    const { data: bookingsData, error: bookingsError } = await supabase
-      .from('bookings')
-      .select('booking_date, start_time, end_time')
-      .eq('schedule_id', scheduleId)
-      .eq('status', 'confirmed')
+          if (tokenError) {
+            console.error('Failed to save guest tokens:', tokenError)
+          } else {
+            console.log('Guest tokens saved successfully')
+          }
+        }
 
-    if (bookingsError) throw bookingsError
+        // 게스트 ID를 명시적으로 전달하여 슬롯 재로드
+        console.log('Reloading slots with guest ID:', guestUser.id)
+        await fetchScheduleData(guestUser.id)
+      } catch (error) {
+        console.error('Error in guest login handler:', error)
+      }
+    }
 
-    setBookings(bookingsData || [])
-  }
+    saveAndReload()
+  }, [guestUser, fetchScheduleData])
 
   const handleGuestLogin = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -282,71 +290,72 @@ useEffect(() => {
     setSelectedSlot(slot)
   }
 
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault()
-  if (!selectedSlot || !schedule) return
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedSlot || !schedule) return
 
-  setSubmitting(true)
+    setSubmitting(true)
 
-  try {
-    // 예약 저장
-    const { error: bookingError } = await supabase
-      .from('bookings')
-      .insert({
-        schedule_id: schedule.id,
-        guest_name: guestInfo.name,
-        guest_email: guestInfo.email,
-        booking_date: selectedSlot.date,
-        start_time: selectedSlot.start_time,
-        end_time: selectedSlot.end_time,
-        status: 'confirmed',
-      })
-
-    if (bookingError) throw bookingError
-
-    // Google Calendar에 이벤트 추가 (호스트 + 게스트)
     try {
-      console.log('Calling calendar API...')
-      const response = await fetch('/api/calendar/add-event', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          scheduleId: schedule.id,
-          bookingDate: selectedSlot.date,
-          startTime: selectedSlot.start_time,
-          endTime: selectedSlot.end_time,
-          guestName: guestInfo.name,
-          guestEmail: guestInfo.email,
-          guestUserId: guestUser?.id, // 게스트 ID 추가
-        }),
-      })
-      
-      const result = await response.json()
-      console.log('Calendar API response:', result)
-      
-      if (!response.ok) {
-        console.error('Calendar API failed:', result)
+      // 예약 저장
+      const { error: bookingError } = await supabase
+        .from('bookings')
+        .insert({
+          schedule_id: schedule.id,
+          guest_name: guestInfo.name,
+          guest_email: guestInfo.email,
+          booking_date: selectedSlot.date,
+          start_time: selectedSlot.start_time,
+          end_time: selectedSlot.end_time,
+          status: 'confirmed',
+        })
+
+      if (bookingError) throw bookingError
+
+      // Google Calendar에 이벤트 추가 (호스트 + 게스트)
+      try {
+        console.log('Calling calendar API...')
+        const response = await fetch('/api/calendar/add-event', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            scheduleId: schedule.id,
+            bookingDate: selectedSlot.date,
+            startTime: selectedSlot.start_time,
+            endTime: selectedSlot.end_time,
+            guestName: guestInfo.name,
+            guestEmail: guestInfo.email,
+            guestUserId: guestUser?.id,
+          }),
+        })
+        
+        const result = await response.json()
+        console.log('Calendar API response:', result)
+        
+        if (!response.ok) {
+          console.error('Calendar API failed:', result)
+        }
+      } catch (calendarError) {
+        console.error('Calendar event creation failed:', calendarError)
+        // 캘린더 추가 실패해도 예약은 완료된 것으로 처리
       }
-    } catch (calendarError) {
-      console.error('Calendar event creation failed:', calendarError)
-      // 캘린더 추가 실패해도 예약은 완료된 것으로 처리
+      
+      alert('予約が完了しました！\nカレンダーに追加されました。')
+      
+      // 페이지 새로고침
+      setSelectedSlot(null)
+      setGuestInfo({ name: '', email: '' })
+      await fetchScheduleData()
+    } catch (error: unknown) {
+      console.error('Error:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      alert('予約に失敗しました: ' + errorMessage)
+    } finally {
+      setSubmitting(false)
     }
-    
-    alert('予約が完了しました！\nカレンダーに追加されました。')
-    
-    // 페이지 새로고침
-    setSelectedSlot(null)
-    setGuestInfo({ name: '', email: '' })
-    await fetchScheduleData()
-  } catch (error: any) {
-    console.error('Error:', error)
-    alert('予約に失敗しました: ' + error.message)
-  } finally {
-    setSubmitting(false)
   }
-}
 
   if (loading) {
     return (
@@ -532,84 +541,85 @@ const handleSubmit = async (e: React.FormEvent) => {
               <h2 className="text-lg font-medium text-gray-900 mb-4">
                 予約情報
               </h2>
-{selectedSlot ? (
-  <form onSubmit={handleSubmit} className="space-y-4">
-    <div className="bg-blue-50 p-3 rounded-md">
-      <p className="text-sm font-medium text-blue-900">
-        選択した時間
-      </p>
-      <p className="text-sm text-blue-700 mt-1">
-        {new Date(selectedSlot.date).toLocaleDateString('ja-JP')}
-      </p>
-      <p className="text-sm text-blue-700">
-        {selectedSlot.start_time.slice(0, 5)} - {selectedSlot.end_time.slice(0, 5)}
-      </p>
-    </div>
 
-    {guestUser && (
-      <div className="bg-green-50 p-3 rounded-md">
-        <p className="text-xs text-green-700">
-          ✓ Googleアカウントでログイン済み
-        </p>
-      </div>
-    )}
+              {selectedSlot ? (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="bg-blue-50 p-3 rounded-md">
+                    <p className="text-sm font-medium text-blue-900">
+                      選択した時間
+                    </p>
+                    <p className="text-sm text-blue-700 mt-1">
+                      {new Date(selectedSlot.date).toLocaleDateString('ja-JP')}
+                    </p>
+                    <p className="text-sm text-blue-700">
+                      {selectedSlot.start_time.slice(0, 5)} - {selectedSlot.end_time.slice(0, 5)}
+                    </p>
+                  </div>
 
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        お名前 *
-      </label>
-      <input
-        type="text"
-        required
-        value={guestInfo.name}
-        onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
-        disabled={!!guestUser}
-        className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
-          guestUser ? 'bg-gray-100 cursor-not-allowed' : ''
-        }`}
-        placeholder="山田太郎"
-      />
-      {guestUser && (
-        <p className="text-xs text-gray-500 mt-1">
-          Googleアカウントから自動入力
-        </p>
-      )}
-    </div>
+                  {guestUser && (
+                    <div className="bg-green-50 p-3 rounded-md">
+                      <p className="text-xs text-green-700">
+                        ✓ Googleアカウントでログイン済み
+                      </p>
+                    </div>
+                  )}
 
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        メールアドレス *
-      </label>
-      <input
-        type="email"
-        required
-        value={guestInfo.email}
-        onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
-        disabled={!!guestUser}
-        className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
-          guestUser ? 'bg-gray-100 cursor-not-allowed' : ''
-        }`}
-        placeholder="example@email.com"
-      />
-      {guestUser && (
-        <p className="text-xs text-gray-500 mt-1">
-          Googleアカウントから自動入力
-        </p>
-      )}
-    </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      お名前 *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={guestInfo.name}
+                      onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
+                      disabled={!!guestUser}
+                      className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+                        guestUser ? 'bg-gray-100 cursor-not-allowed' : ''
+                      }`}
+                      placeholder="山田太郎"
+                    />
+                    {guestUser && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Googleアカウントから自動入力
+                      </p>
+                    )}
+                  </div>
 
-    <button
-      type="submit"
-      disabled={submitting}
-      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md disabled:bg-gray-400"
-    >
-      {submitting ? '予約中...' : '予約を確定する'}
-    </button>
-  </form>
-) : (
-  <p className="text-sm text-gray-500">
-    予約可能な時間を選択してください
-  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      メールアドレス *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={guestInfo.email}
+                      onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
+                      disabled={!!guestUser}
+                      className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+                        guestUser ? 'bg-gray-100 cursor-not-allowed' : ''
+                      }`}
+                      placeholder="example@email.com"
+                    />
+                    {guestUser && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Googleアカウントから自動入力
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md disabled:bg-gray-400"
+                  >
+                    {submitting ? '予約中...' : '予約を確定する'}
+                  </button>
+                </form>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  予約可能な時間を選択してください
+                </p>
               )}
             </div>
           </div>
