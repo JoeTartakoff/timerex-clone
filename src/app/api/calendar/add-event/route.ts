@@ -31,8 +31,8 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
 
 async function addCalendarEvent(
   accessToken: string,
-  eventData: any
-): Promise<any> {
+  eventData: Record<string, unknown>
+): Promise<Record<string, unknown>> {
   const response = await fetch(
     'https://www.googleapis.com/calendar/v3/calendars/primary/events',
     {
@@ -131,14 +131,14 @@ export async function POST(request: Request) {
     // 호스트의 캘린더에 이벤트 추가
     console.log('Adding event to host calendar...')
     const hostEvent = await addCalendarEvent(hostAccessToken, eventData)
-    console.log('Host event created:', hostEvent.id)
+    console.log('Host event created:', (hostEvent as { id: string }).id)
 
     // 게스트가 로그인한 경우, 게스트의 캘린더에도 추가
     let guestEvent = null
     if (guestUserId) {
       console.log('Guest is logged in, adding to guest calendar...')
       
-      const { data: guestTokens, error: guestTokensError } = await supabaseAdmin
+      const { data: guestTokens } = await supabaseAdmin
         .from('user_tokens')
         .select('*')
         .eq('user_id', guestUserId)
@@ -172,7 +172,7 @@ export async function POST(request: Request) {
 
         try {
           guestEvent = await addCalendarEvent(guestAccessToken, guestEventData)
-          console.log('Guest event created:', guestEvent.id)
+          console.log('Guest event created:', (guestEvent as { id: string }).id)
         } catch (error) {
           console.error('Failed to add event to guest calendar:', error)
           // 게스트 캘린더 추가 실패해도 계속 진행
@@ -184,15 +184,16 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ 
       success: true,
-      hostEventId: hostEvent.id,
-      guestEventId: guestEvent?.id,
-      hostEventLink: hostEvent.htmlLink,
-      guestEventLink: guestEvent?.htmlLink
+      hostEventId: (hostEvent as { id: string }).id,
+      guestEventId: guestEvent ? (guestEvent as { id: string }).id : null,
+      hostEventLink: (hostEvent as { htmlLink: string }).htmlLink,
+      guestEventLink: guestEvent ? (guestEvent as { htmlLink: string }).htmlLink : null
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error adding calendar event:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json(
-      { error: error.message },
+      { error: errorMessage },
       { status: 500 }
     )
   }

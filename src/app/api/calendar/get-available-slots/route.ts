@@ -200,15 +200,17 @@ export async function POST(request: Request) {
       slots: availableSlots,
       isGuestLoggedIn: !!guestUserId
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('=== API ERROR ===')
-    console.error('Error message:', error.message)
-    console.error('Error stack:', error.stack)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    console.error('Error message:', errorMessage)
+    console.error('Error stack:', errorStack)
     
     return NextResponse.json(
       { 
         success: false, 
-        error: error.message || 'Internal server error',
+        error: errorMessage,
         useStaticSlots: true 
       },
       { status: 500 }
