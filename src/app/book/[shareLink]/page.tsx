@@ -137,80 +137,86 @@ export default function BookingPage() {
     return slots
   }, [])
 
-  const fetchScheduleData = useCallback(async (guestUserId?: string) => {
+const fetchScheduleData = useCallback(async (guestUserId?: string) => {
+  try {
+    console.log('=== fetchScheduleData START ===')
+    console.log('shareLink:', shareLink)
+    console.log('guestUserId param:', guestUserId)
+    console.log('guestUser state:', guestUser?.id)
+    
+    setIsLoadingSlots(true)
+    
+    const { data: scheduleData, error: scheduleError } = await supabase
+      .from('schedules')
+      .select('*')
+      .eq('share_link', shareLink)
+      .single()
+
+    console.log('Schedule query result:', scheduleData)
+
+    if (scheduleError) throw scheduleError
+
+    setSchedule(scheduleData)
+
+    // 실시간으로 Google Calendar에서 가능한 시간 가져오기 시도
     try {
-      console.log('=== fetchScheduleData START ===')
-      console.log('shareLink:', shareLink)
+      const finalGuestUserId = guestUserId || guestUser?.id
+      console.log('🔍 Final guest user ID for API:', finalGuestUserId)
+      console.log('Trying to fetch from Google Calendar API...')
       
-      setIsLoadingSlots(true)
-      
-      const { data: scheduleData, error: scheduleError } = await supabase
-        .from('schedules')
-        .select('*')
-        .eq('share_link', shareLink)
-        .single()
+      const response = await fetch('/api/calendar/get-available-slots', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          scheduleId: scheduleData.id,
+          guestUserId: finalGuestUserId,
+        }),
+      })
 
-      console.log('Schedule query result:', scheduleData)
+      console.log('API response status:', response.status)
 
-      if (scheduleError) throw scheduleError
-
-      setSchedule(scheduleData)
-
-      // 실시간으로 Google Calendar에서 가능한 시간 가져오기 시도
-      try {
-        const finalGuestUserId = guestUserId || guestUser?.id
-        console.log('Trying to fetch from Google Calendar API...')
+      if (response.ok) {
+        const result = await response.json()
+        console.log('🔍 API result:', result)
         
-        const response = await fetch('/api/calendar/get-available-slots', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            scheduleId: scheduleData.id,
-            guestUserId: finalGuestUserId,
-          }),
-        })
-
-        if (response.ok) {
-          const result = await response.json()
-          
-          if (result.success && result.slots && result.slots.length > 0) {
-            const slotsWithId = result.slots.map((slot: { date: string; startTime: string; endTime: string }, index: number) => ({
-              id: `${slot.date}-${slot.startTime}-${index}`,
-              date: slot.date,
-              start_time: slot.startTime,
-              end_time: slot.endTime,
-            }))
-            console.log('Using Calendar API slots:', slotsWithId.length)
-            setAvailableSlots(slotsWithId)
-            setIsLoadingSlots(false)
-            setLoading(false)
-            return
-          }
+        if (result.success && result.slots && result.slots.length > 0) {
+          const slotsWithId = result.slots.map((slot: { date: string; startTime: string; endTime: string }, index: number) => ({
+            id: `${slot.date}-${slot.startTime}-${index}`,
+            date: slot.date,
+            start_time: slot.startTime,
+            end_time: slot.endTime,
+          }))
+          console.log('Using Calendar API slots:', slotsWithId.length)
+          setAvailableSlots(slotsWithId)
+          setIsLoadingSlots(false)
+          setLoading(false)
+          return
         }
-        
-        throw new Error('Calendar API failed or returned no slots')
-      } catch (error) {
-        console.log('Calendar API failed, using default slots:', error)
-        // API 실패 시 기본 시간대 생성
-        const defaultSlots = generateDefaultSlots(
-          scheduleData.date_range_start,
-          scheduleData.date_range_end,
-          scheduleData.time_slot_duration
-        )
-        console.log('Generated default slots:', defaultSlots.length)
-        setAvailableSlots(defaultSlots)
       }
+      
+      throw new Error('Calendar API failed or returned no slots')
     } catch (error) {
-      console.error('Error in fetchScheduleData:', error)
-      alert('スケジュールの読み込みに失敗しました: ' + error)
-    } finally {
-      console.log('Setting loading to false')
-      setLoading(false)
-      setIsLoadingSlots(false)
+      console.log('Calendar API failed, using default slots:', error)
+      // API 실패 시 기본 시간대 생성
+      const defaultSlots = generateDefaultSlots(
+        scheduleData.date_range_start,
+        scheduleData.date_range_end,
+        scheduleData.time_slot_duration
+      )
+      console.log('Generated default slots:', defaultSlots.length)
+      setAvailableSlots(defaultSlots)
     }
-  }, [shareLink, guestUser?.id, generateDefaultSlots])
+  } catch (error) {
+    console.error('Error in fetchScheduleData:', error)
+    alert('スケジュールの読み込みに失敗しました: ' + error)
+  } finally {
+    console.log('Setting loading to false')
+    setLoading(false)
+    setIsLoadingSlots(false)
+  }
+}, [shareLink, guestUser?.id, generateDefaultSlots])
 
   useEffect(() => {
     console.log('=== useEffect triggered ===')
