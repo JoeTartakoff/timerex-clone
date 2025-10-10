@@ -195,7 +195,8 @@ export async function POST(request: Request) {
     }
 
     console.log('Schedule found:', schedule.title)
-
+console.log('Schedule found:', schedule.title)
+console.log('🔍 Schedule date range:', schedule.date_range_start, 'to', schedule.date_range_end)
     // 호스트 토큰 가져오기
     const { data: hostTokens, error: hostTokensError } = await supabaseAdmin
       .from('user_tokens')
@@ -239,10 +240,12 @@ export async function POST(request: Request) {
     }
 
     // 호스트 캘린더 이벤트 가져오기
-    const timeMin = new Date(schedule.date_range_start).toISOString()
-    const timeMax = new Date(schedule.date_range_end + 'T23:59:59').toISOString()
-    
-    console.log('Fetching host calendar events...')
+// 호스트 캘린더 이벤트 가져오기
+const timeMin = new Date(schedule.date_range_start).toISOString()
+const timeMax = new Date(schedule.date_range_end + 'T23:59:59').toISOString()
+
+console.log('🔍 Time range - timeMin:', timeMin, 'timeMax:', timeMax)
+console.log('Fetching host calendar events...')
     const hostEvents = await fetchCalendarEvents(hostAccessToken, timeMin, timeMax)
     console.log('🔍 Host events count:', hostEvents.length)
 
