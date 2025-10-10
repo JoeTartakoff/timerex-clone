@@ -29,43 +29,82 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
   }
 }
 
+// ⭐ 새로운 페이지네이션 지원 함수
 async function fetchCalendarEvents(
   accessToken: string,
   timeMin: string,
   timeMax: string
 ) {
-  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
-    `timeMin=${encodeURIComponent(timeMin)}&` +
-    `timeMax=${encodeURIComponent(timeMax)}&` +
-    `singleEvents=true&` +
-    `orderBy=startTime`
+  const allEvents: any[] = []
+  let pageToken: string | undefined = undefined
+  let pageCount = 0
+  const maxPages = 10 // 무한 루프 방지
 
-  console.log('🔍 Fetching calendar with URL:', url)
-  console.log('🔍 Using access token (first 20 chars):', accessToken.substring(0, 20))
+  console.log('🔍 Starting to fetch calendar events...')
+  console.log('🔍 Time range:', { timeMin, timeMax })
 
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  })
+  do {
+    try {
+      pageCount++
+      const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events')
+      url.searchParams.set('timeMin', timeMin)
+      url.searchParams.set('timeMax', timeMax)
+      url.searchParams.set('singleEvents', 'true')
+      url.searchParams.set('orderBy', 'startTime')
+      url.searchParams.set('maxResults', '250') // ⭐ 최대값 설정
+      if (pageToken) {
+        url.searchParams.set('pageToken', pageToken)
+      }
 
-  console.log('🔍 Calendar API response status:', response.status)
+      console.log(`🔍 Fetching page ${pageCount}...`)
+      console.log(`🔍 URL: ${url.toString()}`)
 
-  if (!response.ok) {
-    const errorData = await response.json()
-    console.error('🔍 Calendar API error details:', JSON.stringify(errorData, null, 2))
-    throw new Error(`Failed to fetch calendar events: ${response.status}`)
-  }
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
 
-  const data = await response.json()
-  console.log('🔍 Calendar API returned items count:', data.items?.length || 0)
-  
-  return data.items?.map((item: any) => ({
+      console.log(`🔍 Page ${pageCount} response status:`, response.status)
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error('🔍 Calendar API error details:', JSON.stringify(errorData, null, 2))
+        throw new Error(`Failed to fetch calendar events: ${response.status}`)
+      }
+
+      const data = await response.json()
+      const pageEvents = data.items || []
+      
+      console.log(`📄 Page ${pageCount}: ${pageEvents.length} events`)
+      console.log(`📄 Has next page: ${!!data.nextPageToken}`)
+      
+      allEvents.push(...pageEvents)
+      pageToken = data.nextPageToken
+
+      if (pageCount >= maxPages) {
+        console.warn(`⚠️ Reached max pages (${maxPages}), stopping`)
+        break
+      }
+    } catch (error) {
+      console.error(`❌ Error fetching page ${pageCount}:`, error)
+      throw error
+    }
+  } while (pageToken)
+
+  console.log(`✅ Total events fetched: ${allEvents.length}`)
+
+  // 이벤트 변환
+  const formattedEvents = allEvents.map((item: any) => ({
     id: item.id,
     summary: item.summary || '予定',
     start: item.start.dateTime || item.start.date,
     end: item.end.dateTime || item.end.date,
-  })) || []
+  }))
+
+  console.log(`✅ Formatted events: ${formattedEvents.length}`)
+  
+  return formattedEvents
 }
 
 function calculateAvailableSlots(
@@ -201,8 +240,8 @@ export async function POST(request: Request) {
     }
 
     console.log('Schedule found:', schedule.title)
-console.log('Schedule found:', schedule.title)
-console.log('🔍 Schedule date range:', schedule.date_range_start, 'to', schedule.date_range_end)
+    console.log('🔍 Schedule date range:', schedule.date_range_start, 'to', schedule.date_range_end)
+
     // 호스트 토큰 가져오기
     const { data: hostTokens, error: hostTokensError } = await supabaseAdmin
       .from('user_tokens')
@@ -246,12 +285,12 @@ console.log('🔍 Schedule date range:', schedule.date_range_start, 'to', schedu
     }
 
     // 호스트 캘린더 이벤트 가져오기
-// 호스트 캘린더 이벤트 가져오기
-const timeMin = new Date(schedule.date_range_start).toISOString()
-const timeMax = new Date(schedule.date_range_end + 'T23:59:59').toISOString()
+    const timeMin = new Date(schedule.date_range_start).toISOString()
+    const timeMax = new Date(schedule.date_range_end + 'T23:59:59').toISOString()
 
-console.log('🔍 Time range - timeMin:', timeMin, 'timeMax:', timeMax)
-console.log('Fetching host calendar events...')
+    console.log('🔍 Time range - timeMin:', timeMin, 'timeMax:', timeMax)
+    console.log('📅 Fetching host calendar events...')
+    
     const hostEvents = await fetchCalendarEvents(hostAccessToken, timeMin, timeMax)
     console.log('🔍 Host events count:', hostEvents.length)
 
@@ -259,7 +298,7 @@ console.log('Fetching host calendar events...')
 
     // 게스트가 로그인한 경우 게스트 캘린더도 확인
     if (guestUserId) {
-      console.log('🔍 Fetching guest calendar events...')
+      console.log('📅 Fetching guest calendar events...')
       console.log('🔍 Looking for guest tokens with user_id:', guestUserId)
       
       const { data: guestTokens, error: guestTokensError } = await supabaseAdmin
