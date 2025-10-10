@@ -1,42 +1,80 @@
 import { CalendarEvent, TimeSlot } from '@/types/calendar'
 
-// Google Calendar API로 일정 가져오기
+// Google Calendar API로 일정 가져오기 (페이지네이션 포함)
 export async function fetchCalendarEvents(
   accessToken: string,
   timeMin: string,
   timeMax: string
 ): Promise<CalendarEvent[]> {
-  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
-    `timeMin=${encodeURIComponent(timeMin)}&` +
-    `timeMax=${encodeURIComponent(timeMax)}&` +
-    `singleEvents=true&` +
-    `orderBy=startTime`
+  const allEvents: CalendarEvent[] = []
+  let pageToken: string | undefined = undefined
+  let pageCount = 0
+  const maxPages = 10
 
-  console.log('Fetching calendar events:', { url, timeMin, timeMax })
+  console.log('📅 Starting to fetch calendar events...')
+  console.log('📅 Time range:', { timeMin, timeMax })
 
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  })
+  do {
+    try {
+      pageCount++
+      
+      let url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+        `timeMin=${encodeURIComponent(timeMin)}&` +
+        `timeMax=${encodeURIComponent(timeMax)}&` +
+        `singleEvents=true&` +
+        `orderBy=startTime&` +
+        `maxResults=250`
+      
+      if (pageToken) {
+        url += `&pageToken=${encodeURIComponent(pageToken)}`
+      }
 
-  console.log('Calendar API response status:', response.status)
+      console.log(`📄 Fetching page ${pageCount}...`)
 
-  if (!response.ok) {
-    const errorData = await response.json()
-    console.error('Calendar API error:', errorData)
-    throw new Error(`カレンダーの取得に失敗しました: ${response.status} - ${JSON.stringify(errorData)}`)
-  }
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
 
-  const data = await response.json()
-  
-  return data.items?.map((item: any) => ({
-    id: item.id,
-    summary: item.summary || '予定',
-    start: item.start.dateTime || item.start.date,
-    end: item.end.dateTime || item.end.date,
-  })) || []
+      console.log(`📄 Page ${pageCount} response status:`, response.status)
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error(`❌ Calendar API error:`, errorData)
+        throw new Error(`カレンダーの取得に失敗しました: ${response.status}`)
+      }
+
+      const data = await response.json()
+      const pageEvents = data.items || []
+      
+      console.log(`📄 Page ${pageCount}: ${pageEvents.length} events`)
+      console.log(`📄 Has next page: ${!!data.nextPageToken}`)
+      
+      const formattedEvents = pageEvents.map((item: any) => ({
+        id: item.id,
+        summary: item.summary || '予定',
+        start: item.start.dateTime || item.start.date,
+        end: item.end.dateTime || item.end.date,
+      }))
+      
+      allEvents.push(...formattedEvents)
+      pageToken = data.nextPageToken
+
+      if (pageCount >= maxPages) {
+        console.warn(`⚠️ Reached max pages (${maxPages}), stopping`)
+        break
+      }
+    } catch (error) {
+      console.error(`❌ Error fetching page ${pageCount}:`, error)
+      throw error
+    }
+  } while (pageToken)
+
+  console.log(`✅ Total events fetched: ${allEvents.length}`)
+  return allEvents
 }
+
 // 빈 시간대 계산
 export function calculateAvailableSlots(
   events: CalendarEvent[],
@@ -172,9 +210,9 @@ function parseTime(time: string): number {
   return hours * 60 + minutes
 }
 
-// 분을 시간으로 변환 (540 -> 09:00)
+// 분을 시간으로 변환 (540 -> 09:00:00)
 function formatTime(minutes: number): string {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
-  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:00`
 }
