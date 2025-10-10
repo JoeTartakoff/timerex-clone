@@ -19,7 +19,7 @@ async function fetchAllCalendars(accessToken: string): Promise<string[]> {
 
     const data = await response.json()
     const calendarIds = data.items
-      ?.filter((cal: any) => cal.selected !== false) // 선택된 캘린더만
+      ?.filter((cal: any) => cal.selected !== false)
       ?.map((cal: any) => cal.id) || ['primary']
 
     console.log('📋 Found calendars:', calendarIds.length)
@@ -108,11 +108,9 @@ export async function fetchCalendarEvents(
   console.log('📅 Time range:', { timeMin, timeMax })
 
   try {
-    // 모든 캘린더 목록 가져오기
     const calendarIds = await fetchAllCalendars(accessToken)
     console.log(`📋 Total calendars to check: ${calendarIds.length}`)
 
-    // 각 캘린더에서 이벤트 가져오기
     const allEventsPromises = calendarIds.map(calendarId =>
       fetchEventsFromCalendar(accessToken, calendarId, timeMin, timeMax)
     )
@@ -120,7 +118,6 @@ export async function fetchCalendarEvents(
     const allEventsArrays = await Promise.all(allEventsPromises)
     const allEvents = allEventsArrays.flat()
 
-    // 중복 제거 (같은 이벤트가 여러 캘린더에 있을 수 있음)
     const uniqueEvents = Array.from(
       new Map(allEvents.map(event => [event.id, event])).values()
     )
@@ -129,10 +126,30 @@ export async function fetchCalendarEvents(
     return uniqueEvents
   } catch (error) {
     console.error('❌ Error in fetchCalendarEvents:', error)
-    // 실패 시 primary만 조회
     console.log('⚠️ Falling back to primary calendar only')
     return fetchEventsFromCalendar(accessToken, 'primary', timeMin, timeMax)
   }
+}
+
+// ⭐ 날짜 문자열을 Asia/Tokyo 기준 Date 객체로 변환
+function parseTokyoDate(dateStr: string, timeStr: string): Date {
+  // YYYY-MM-DDTHH:mm:ss 형식으로 조합
+  const isoString = `${dateStr}T${timeStr}`
+  
+  // 먼저 로컬 Date 객체 생성
+  const localDate = new Date(isoString)
+  
+  // 로컬 타임존 오프셋 (분 단위)
+  const localOffset = localDate.getTimezoneOffset()
+  
+  // Asia/Tokyo 오프셋 (UTC+9 = -540분)
+  const tokyoOffset = -540
+  
+  // 오프셋 차이를 보정
+  const offsetDiff = tokyoOffset - localOffset
+  
+  // 보정된 시간 반환
+  return new Date(localDate.getTime() + offsetDiff * 60 * 1000)
 }
 
 // 빈 시간대 계산
@@ -152,37 +169,41 @@ export function calculateAvailableSlots(
 
   console.log('=== calculateAvailableSlots ===')
   console.log('Events:', events.length)
+  console.log('Server timezone offset (minutes):', new Date().getTimezoneOffset())
 
   // 날짜별로 반복
   for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
     const dateStr = date.toISOString().split('T')[0]
     
-    // 해당 날짜의 이벤트 필터링 (타임존 고려)
+    // ⭐ Asia/Tokyo 기준으로 해당 날짜의 시작과 끝 계산
+    const dayStart = parseTokyoDate(dateStr, '00:00:00')
+    const dayEnd = parseTokyoDate(dateStr, '23:59:59')
+    
+    console.log(`\n📅 Processing date: ${dateStr}`)
+    console.log(`  Day start: ${dayStart.toISOString()}`)
+    console.log(`  Day end: ${dayEnd.toISOString()}`)
+    
+    // 해당 날짜와 겹치는 이벤트 필터링
     const dayEvents = events.filter(event => {
       const eventStart = new Date(event.start)
       const eventEnd = new Date(event.end)
       
-      // ⭐ 슬롯 날짜의 시작과 끝 (로컬 타임존 기준)
-      const dayStart = new Date(`${dateStr}T00:00:00`)
-      const dayEnd = new Date(`${dateStr}T23:59:59`)
-      
-      // 이벤트가 해당 날짜와 겹치는지 확인
       const overlapsDay = (
         (eventStart >= dayStart && eventStart < dayEnd) ||
         (eventEnd > dayStart && eventEnd <= dayEnd) ||
-        (eventStart <= dayStart && eventEnd >= dayEnd)
+        (eventStart < dayStart && eventEnd > dayEnd)
       )
+      
+      if (overlapsDay) {
+        console.log(`  ✓ Event: ${event.summary}`)
+        console.log(`    Start: ${eventStart.toISOString()}`)
+        console.log(`    End: ${eventEnd.toISOString()}`)
+      }
       
       return overlapsDay
     })
 
-    console.log(`Date: ${dateStr}, Events: ${dayEvents.length}`)
-    if (dayEvents.length > 0) {
-      console.log(`  Events on ${dateStr}:`)
-      dayEvents.forEach(e => {
-        console.log(`    - ${e.summary}: ${e.start} to ${e.end}`)
-      })
-    }
+    console.log(`  Found ${dayEvents.length} events on this day`)
 
     // 근무 시간대를 슬롯으로 분할
     const slots = generateTimeSlots(
@@ -196,26 +217,24 @@ export function calculateAvailableSlots(
 
     // 이벤트와 겹치지 않는 슬롯만 추가
     slots.forEach(slot => {
-      // ⭐ 슬롯 시간을 명확하게 파싱 (로컬 타임존)
-      const slotStart = new Date(`${slot.date}T${slot.startTime}`)
-      const slotEnd = new Date(`${slot.date}T${slot.endTime}`)
+      // ⭐ 슬롯 시간을 Asia/Tokyo 기준으로 파싱
+      const slotStart = parseTokyoDate(slot.date, slot.startTime)
+      const slotEnd = parseTokyoDate(slot.date, slot.endTime)
 
       const isAvailable = !dayEvents.some(event => {
         const eventStart = new Date(event.start)
         const eventEnd = new Date(event.end)
         
-        // ⭐ 겹침 체크 (밀리초 단위로 비교)
+        const slotStartMs = slotStart.getTime()
+        const slotEndMs = slotEnd.getTime()
+        const eventStartMs = eventStart.getTime()
+        const eventEndMs = eventEnd.getTime()
+        
         const overlaps = (
-          (slotStart.getTime() >= eventStart.getTime() && slotStart.getTime() < eventEnd.getTime()) ||
-          (slotEnd.getTime() > eventStart.getTime() && slotEnd.getTime() <= eventEnd.getTime()) ||
-          (slotStart.getTime() <= eventStart.getTime() && slotEnd.getTime() >= eventEnd.getTime())
+          (slotStartMs >= eventStartMs && slotStartMs < eventEndMs) ||
+          (slotEndMs > eventStartMs && slotEndMs <= eventEndMs) ||
+          (slotStartMs <= eventStartMs && slotEndMs >= eventEndMs)
         )
-
-        if (overlaps) {
-          console.log(`    ❌ Slot ${slot.startTime}-${slot.endTime} overlaps with ${event.summary}`)
-          console.log(`       Slot: ${slotStart.toISOString()} - ${slotEnd.toISOString()}`)
-          console.log(`       Event: ${eventStart.toISOString()} - ${eventEnd.toISOString()}`)
-        }
 
         return overlaps
       })
@@ -226,7 +245,7 @@ export function calculateAvailableSlots(
     })
   }
 
-  console.log(`Total available slots: ${availableSlots.length}`)
+  console.log(`\n✅ Total available slots: ${availableSlots.length}`)
   return availableSlots
 }
 
@@ -250,7 +269,6 @@ function generateTimeSlots(
   while (current + duration <= end) {
     const slotEnd = current + duration
 
-    // 점심시간과 겹치는지 확인
     const overlapLunch = (
       (current >= lunchStartMin && current < lunchEndMin) ||
       (slotEnd > lunchStartMin && slotEnd <= lunchEndMin) ||
@@ -271,13 +289,11 @@ function generateTimeSlots(
   return slots
 }
 
-// 시간을 분으로 변환 (09:00 -> 540)
 function parseTime(time: string): number {
   const [hours, minutes] = time.split(':').map(Number)
   return hours * 60 + minutes
 }
 
-// 분을 시간으로 변환 (540 -> 09:00:00)
 function formatTime(minutes: number): string {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
