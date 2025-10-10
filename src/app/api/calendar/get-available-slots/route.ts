@@ -40,19 +40,25 @@ async function fetchCalendarEvents(
     `singleEvents=true&` +
     `orderBy=startTime`
 
+  console.log('🔍 Fetching calendar with URL:', url)
+  console.log('🔍 Using access token (first 20 chars):', accessToken.substring(0, 20))
+
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
   })
 
+  console.log('🔍 Calendar API response status:', response.status)
+
   if (!response.ok) {
     const errorData = await response.json()
-    console.error('Calendar API error:', errorData)
+    console.error('🔍 Calendar API error details:', JSON.stringify(errorData, null, 2))
     throw new Error(`Failed to fetch calendar events: ${response.status}`)
   }
 
   const data = await response.json()
+  console.log('🔍 Calendar API returned items count:', data.items?.length || 0)
   
   return data.items?.map((item: any) => ({
     id: item.id,
