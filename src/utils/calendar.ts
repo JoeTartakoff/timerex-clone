@@ -157,20 +157,32 @@ export function calculateAvailableSlots(
   for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
     const dateStr = date.toISOString().split('T')[0]
     
-    // 해당 날짜의 이벤트 필터링
+    // 해당 날짜의 이벤트 필터링 (타임존 고려)
     const dayEvents = events.filter(event => {
       const eventStart = new Date(event.start)
+      const eventEnd = new Date(event.end)
       
-      // 로컬 날짜로 변환해서 비교
-      const eventYear = eventStart.getFullYear()
-      const eventMonth = String(eventStart.getMonth() + 1).padStart(2, '0')
-      const eventDay = String(eventStart.getDate()).padStart(2, '0')
-      const eventDateStr = `${eventYear}-${eventMonth}-${eventDay}`
+      // ⭐ 슬롯 날짜의 시작과 끝 (로컬 타임존 기준)
+      const dayStart = new Date(`${dateStr}T00:00:00`)
+      const dayEnd = new Date(`${dateStr}T23:59:59`)
       
-      return eventDateStr === dateStr
+      // 이벤트가 해당 날짜와 겹치는지 확인
+      const overlapsDay = (
+        (eventStart >= dayStart && eventStart < dayEnd) ||
+        (eventEnd > dayStart && eventEnd <= dayEnd) ||
+        (eventStart <= dayStart && eventEnd >= dayEnd)
+      )
+      
+      return overlapsDay
     })
 
     console.log(`Date: ${dateStr}, Events: ${dayEvents.length}`)
+    if (dayEvents.length > 0) {
+      console.log(`  Events on ${dateStr}:`)
+      dayEvents.forEach(e => {
+        console.log(`    - ${e.summary}: ${e.start} to ${e.end}`)
+      })
+    }
 
     // 근무 시간대를 슬롯으로 분할
     const slots = generateTimeSlots(
@@ -184,6 +196,7 @@ export function calculateAvailableSlots(
 
     // 이벤트와 겹치지 않는 슬롯만 추가
     slots.forEach(slot => {
+      // ⭐ 슬롯 시간을 명확하게 파싱 (로컬 타임존)
       const slotStart = new Date(`${slot.date}T${slot.startTime}`)
       const slotEnd = new Date(`${slot.date}T${slot.endTime}`)
 
@@ -191,12 +204,18 @@ export function calculateAvailableSlots(
         const eventStart = new Date(event.start)
         const eventEnd = new Date(event.end)
         
+        // ⭐ 겹침 체크 (밀리초 단위로 비교)
         const overlaps = (
-          (slotStart >= eventStart && slotStart < eventEnd) ||
-          (slotEnd > eventStart && slotEnd <= eventEnd) ||
-          (slotStart <= eventStart && slotEnd >= eventEnd) ||
-          (eventStart <= slotStart && eventEnd >= slotEnd)
+          (slotStart.getTime() >= eventStart.getTime() && slotStart.getTime() < eventEnd.getTime()) ||
+          (slotEnd.getTime() > eventStart.getTime() && slotEnd.getTime() <= eventEnd.getTime()) ||
+          (slotStart.getTime() <= eventStart.getTime() && slotEnd.getTime() >= eventEnd.getTime())
         )
+
+        if (overlaps) {
+          console.log(`    ❌ Slot ${slot.startTime}-${slot.endTime} overlaps with ${event.summary}`)
+          console.log(`       Slot: ${slotStart.toISOString()} - ${slotEnd.toISOString()}`)
+          console.log(`       Event: ${eventStart.toISOString()} - ${eventEnd.toISOString()}`)
+        }
 
         return overlaps
       })
