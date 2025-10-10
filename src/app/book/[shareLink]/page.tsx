@@ -54,18 +54,19 @@ export default function BookingPage() {
 
   const checkGuestUser = useCallback(async () => {
     try {
-      console.log('Checking guest user...')
+      console.log('👤 Checking guest user...')
       const { data: { user }, error } = await supabase.auth.getUser()
-      console.log('Guest user result:', { user: user?.email, error })
+      console.log('👤 Guest user result:', { email: user?.email, id: user?.id, error })
       if (user) {
         setGuestUser(user as User)
       }
     } catch (error) {
-      console.error('Error checking guest user:', error)
+      console.error('❌ Error checking guest user:', error)
     }
   }, [])
 
   const checkTokenUsed = useCallback(async (token: string) => {
+    console.log('🔍 Checking if token is used:', token)
     const { data, error } = await supabase
       .from('bookings')
       .select('id')
@@ -73,13 +74,15 @@ export default function BookingPage() {
       .maybeSingle()
 
     if (error) {
-      console.error('Error checking token:', error)
+      console.error('❌ Error checking token:', error)
       return
     }
 
     if (data) {
-      console.log('Token already used:', token)
+      console.log('⚠️ Token already used:', token)
       setTokenAlreadyUsed(true)
+    } else {
+      console.log('✅ Token is available:', token)
     }
   }, [])
 
@@ -88,6 +91,7 @@ export default function BookingPage() {
     dateRangeEnd: string,
     slotDuration: number
   ) => {
+    console.log('🔧 Generating default slots...')
     const slots: AvailabilitySlot[] = []
     const startDate = new Date(dateRangeStart)
     const endDate = new Date(dateRangeEnd)
@@ -95,18 +99,16 @@ export default function BookingPage() {
     for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
       const dateStr = date.toISOString().split('T')[0]
       
-      // 9:00 - 18:00, 점심시간 12:00 - 13:00 제외
-      const workStart = 9 * 60 // 9:00 in minutes
-      const workEnd = 18 * 60 // 18:00 in minutes
-      const lunchStart = 12 * 60 // 12:00 in minutes
-      const lunchEnd = 13 * 60 // 13:00 in minutes
+      const workStart = 9 * 60
+      const workEnd = 18 * 60
+      const lunchStart = 12 * 60
+      const lunchEnd = 13 * 60
 
       let current = workStart
 
       while (current + slotDuration <= workEnd) {
         const slotEnd = current + slotDuration
 
-        // 점심시간과 겹치는지 확인
         const overlapLunch = (
           (current >= lunchStart && current < lunchEnd) ||
           (slotEnd > lunchStart && slotEnd <= lunchEnd) ||
@@ -134,95 +136,94 @@ export default function BookingPage() {
       }
     }
 
+    console.log('✅ Generated default slots:', slots.length)
     return slots
   }, [])
 
-const fetchScheduleData = useCallback(async (guestUserId?: string) => {
-  try {
-    console.log('=== fetchScheduleData START ===')
-    console.log('shareLink:', shareLink)
-    console.log('guestUserId param:', guestUserId)
-    console.log('guestUser state:', guestUser?.id)
-    
-    setIsLoadingSlots(true)
-    
-    const { data: scheduleData, error: scheduleError } = await supabase
-      .from('schedules')
-      .select('*')
-      .eq('share_link', shareLink)
-      .single()
-
-    console.log('Schedule query result:', scheduleData)
-
-    if (scheduleError) throw scheduleError
-
-    setSchedule(scheduleData)
-
-    // 실시간으로 Google Calendar에서 가능한 시간 가져오기 시도
+  const fetchScheduleData = useCallback(async (guestUserId?: string) => {
     try {
-      const finalGuestUserId = guestUserId || guestUser?.id
-      console.log('🔍 Final guest user ID for API:', finalGuestUserId)
-      console.log('Trying to fetch from Google Calendar API...')
+      console.log('=== fetchScheduleData START ===')
+      console.log('🔗 shareLink:', shareLink)
+      console.log('👤 guestUserId param:', guestUserId)
+      console.log('👤 guestUser state:', guestUser?.id)
       
-      const response = await fetch('/api/calendar/get-available-slots', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          scheduleId: scheduleData.id,
-          guestUserId: finalGuestUserId,
-        }),
-      })
+      setIsLoadingSlots(true)
+      
+      const { data: scheduleData, error: scheduleError } = await supabase
+        .from('schedules')
+        .select('*')
+        .eq('share_link', shareLink)
+        .single()
 
-      console.log('API response status:', response.status)
+      console.log('📋 Schedule query result:', scheduleData ? scheduleData.title : 'not found')
 
-      if (response.ok) {
-        const result = await response.json()
-        console.log('🔍 API result:', result)
+      if (scheduleError) throw scheduleError
+
+      setSchedule(scheduleData)
+
+      // 실시간으로 Google Calendar에서 가능한 시간 가져오기 시도
+      try {
+        const finalGuestUserId = guestUserId || guestUser?.id
+        console.log('🔍 Final guest user ID for API:', finalGuestUserId)
+        console.log('📡 Calling API: /api/calendar/get-available-slots')
         
-        if (result.success && result.slots && result.slots.length > 0) {
-          const slotsWithId = result.slots.map((slot: { date: string; startTime: string; endTime: string }, index: number) => ({
-            id: `${slot.date}-${slot.startTime}-${index}`,
-            date: slot.date,
-            start_time: slot.startTime,
-            end_time: slot.endTime,
-          }))
-          console.log('Using Calendar API slots:', slotsWithId.length)
-          setAvailableSlots(slotsWithId)
-          setIsLoadingSlots(false)
-          setLoading(false)
-          return
+        const response = await fetch('/api/calendar/get-available-slots', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            scheduleId: scheduleData.id,
+            guestUserId: finalGuestUserId,
+          }),
+        })
+
+        console.log('📡 API response status:', response.status)
+
+        if (response.ok) {
+          const result = await response.json()
+          console.log('📡 API result:', result)
+          
+          if (result.success && result.slots && result.slots.length > 0) {
+            const slotsWithId = result.slots.map((slot: { date: string; startTime: string; endTime: string }, index: number) => ({
+              id: `${slot.date}-${slot.startTime}-${index}`,
+              date: slot.date,
+              start_time: slot.startTime,
+              end_time: slot.endTime,
+            }))
+            console.log('✅ Using Calendar API slots:', slotsWithId.length)
+            setAvailableSlots(slotsWithId)
+            setIsLoadingSlots(false)
+            setLoading(false)
+            return
+          }
         }
+        
+        throw new Error('Calendar API failed or returned no slots')
+      } catch (error) {
+        console.log('⚠️ Calendar API failed, using default slots:', error)
+        const defaultSlots = generateDefaultSlots(
+          scheduleData.date_range_start,
+          scheduleData.date_range_end,
+          scheduleData.time_slot_duration
+        )
+        console.log('✅ Generated default slots:', defaultSlots.length)
+        setAvailableSlots(defaultSlots)
       }
-      
-      throw new Error('Calendar API failed or returned no slots')
     } catch (error) {
-      console.log('Calendar API failed, using default slots:', error)
-      // API 실패 시 기본 시간대 생성
-      const defaultSlots = generateDefaultSlots(
-        scheduleData.date_range_start,
-        scheduleData.date_range_end,
-        scheduleData.time_slot_duration
-      )
-      console.log('Generated default slots:', defaultSlots.length)
-      setAvailableSlots(defaultSlots)
+      console.error('❌ Error in fetchScheduleData:', error)
+      alert('スケジュールの読み込みに失敗しました: ' + error)
+    } finally {
+      console.log('🏁 Setting loading to false')
+      setLoading(false)
+      setIsLoadingSlots(false)
     }
-  } catch (error) {
-    console.error('Error in fetchScheduleData:', error)
-    alert('スケジュールの読み込みに失敗しました: ' + error)
-  } finally {
-    console.log('Setting loading to false')
-    setLoading(false)
-    setIsLoadingSlots(false)
-  }
-}, [shareLink, guestUser?.id, generateDefaultSlots])
+  }, [shareLink, guestUser?.id, generateDefaultSlots])
 
   useEffect(() => {
     console.log('=== useEffect triggered ===')
-    console.log('shareLink:', shareLink)
+    console.log('🔗 shareLink:', shareLink)
     
-    // URL 파라미터에서 mode와 token 확인
     const urlParams = new URLSearchParams(window.location.search)
     const mode = urlParams.get('mode')
     const token = urlParams.get('token')
@@ -230,9 +231,7 @@ const fetchScheduleData = useCallback(async (guestUserId?: string) => {
     if (mode === 'onetime' && token) {
       setIsOneTimeMode(true)
       setOneTimeToken(token)
-      console.log('One-time mode activated with token:', token)
-      
-      // 이 토큰으로 이미 예약했는지 확인
+      console.log('🔐 One-time mode activated with token:', token)
       checkTokenUsed(token)
     }
     
@@ -241,7 +240,7 @@ const fetchScheduleData = useCallback(async (guestUserId?: string) => {
         await checkGuestUser()
         await fetchScheduleData()
       } catch (error) {
-        console.error('Init error:', error)
+        console.error('❌ Init error:', error)
         setLoading(false)
       }
     }
@@ -254,7 +253,8 @@ const fetchScheduleData = useCallback(async (guestUserId?: string) => {
 
     const saveAndReload = async () => {
       console.log('=== Guest Login Detected ===')
-      console.log('Guest user ID:', guestUser.id)
+      console.log('👤 Guest user ID:', guestUser.id)
+      console.log('👤 Guest user email:', guestUser.email)
       
       setGuestInfo({
         name: guestUser.user_metadata?.full_name || guestUser.email?.split('@')[0] || '',
@@ -265,9 +265,16 @@ const fetchScheduleData = useCallback(async (guestUserId?: string) => {
       try {
         const { data: { session } } = await supabase.auth.getSession()
         
+        console.log('🔑 Session check:', {
+          hasSession: !!session,
+          hasProviderToken: !!session?.provider_token,
+          hasRefreshToken: !!session?.provider_refresh_token,
+        })
+        
         if (session?.provider_token && session?.provider_refresh_token) {
           const expiresAt = new Date(Date.now() + (session.expires_in || 3600) * 1000).toISOString()
           
+          console.log('💾 Saving guest tokens...')
           const { error: tokenError } = await supabase
             .from('user_tokens')
             .upsert({
@@ -281,51 +288,58 @@ const fetchScheduleData = useCallback(async (guestUserId?: string) => {
             })
 
           if (tokenError) {
-            console.error('Failed to save guest tokens:', tokenError)
+            console.error('❌ Failed to save guest tokens:', tokenError)
           } else {
-            console.log('Guest tokens saved successfully')
+            console.log('✅ Guest tokens saved successfully')
           }
+        } else {
+          console.warn('⚠️ No provider tokens in session')
         }
 
-        console.log('Reloading slots with guest ID:', guestUser.id)
+        console.log('🔄 Reloading slots with guest ID:', guestUser.id)
         await fetchScheduleData(guestUser.id)
       } catch (error) {
-        console.error('Error in guest login handler:', error)
+        console.error('❌ Error in guest login handler:', error)
       }
     }
 
     saveAndReload()
   }, [guestUser, fetchScheduleData])
 
-const handleGuestLogin = async () => {
-  // 현재 URL을 그대로 redirectTo로 사용 (쿼리 파라미터 포함)
-  const currentUrl = window.location.href
-  
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      scopes: 'https://www.googleapis.com/auth/calendar',
-      redirectTo: currentUrl, // 현재 페이지로 다시 돌아오기
-      queryParams: {
-        access_type: 'offline',
-        prompt: 'consent',
+  const handleGuestLogin = async () => {
+    console.log('🔐 Initiating guest login...')
+    const currentUrl = window.location.href
+    console.log('🔗 Current URL for redirect:', currentUrl)
+    
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        scopes: 'https://www.googleapis.com/auth/calendar',
+        redirectTo: currentUrl,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
       },
-    },
-  })
+    })
 
-  if (error) {
-    console.error('ログインエラー:', error.message)
-    alert('ログインに失敗しました')
+    if (error) {
+      console.error('❌ ログインエラー:', error.message)
+      alert('ログインに失敗しました')
+    } else {
+      console.log('✅ Login initiated successfully')
+    }
   }
-}
 
-const handleGuestLogout = async () => {
+  const handleGuestLogout = async () => {
+    console.log('🚪 Logging out guest...')
     await supabase.auth.signOut()
     setGuestUser(null)
     await fetchScheduleData()
   }
 
   const handleSlotSelect = (slot: AvailabilitySlot) => {
+    console.log('📅 Slot selected:', slot)
     setSelectedSlot(slot)
   }
 
@@ -333,10 +347,15 @@ const handleGuestLogout = async () => {
     e.preventDefault()
     if (!selectedSlot || !schedule) return
 
+    console.log('=== BOOKING SUBMISSION ===')
+    console.log('📋 Schedule:', schedule.title)
+    console.log('📅 Selected slot:', selectedSlot)
+    console.log('👤 Guest info:', guestInfo)
+
     setSubmitting(true)
 
     try {
-      // bookings 테이블에 저장 (원타임 토큰 추적용)
+      console.log('💾 Saving booking to database...')
       const { error: bookingError } = await supabase
         .from('bookings')
         .insert({
@@ -354,11 +373,10 @@ const handleGuestLogout = async () => {
 
       if (bookingError) throw bookingError
 
-      console.log('Booking record created successfully')
+      console.log('✅ Booking record created successfully')
 
-      // Google Calendar에 이벤트 추가 시도 (실패해도 계속 진행)
       try {
-        console.log('Trying to add to Google Calendar...')
+        console.log('📅 Trying to add to Google Calendar...')
         const response = await fetch('/api/calendar/add-event', {
           method: 'POST',
           headers: {
@@ -378,23 +396,23 @@ const handleGuestLogout = async () => {
         
         if (response.ok) {
           const result = await response.json()
-          console.log('Calendar API success:', result)
+          console.log('✅ Calendar API success:', result)
           alert('予約が完了しました！\nカレンダーに追加されました。')
         } else {
-          console.log('Calendar API failed, but booking is saved')
+          console.log('⚠️ Calendar API failed, but booking is saved')
           alert('予約が完了しました！\n（カレンダーへの追加は失敗しましたが、予約は保存されています）')
         }
       } catch (calendarError) {
-        console.error('Calendar event creation failed:', calendarError)
+        console.error('❌ Calendar event creation failed:', calendarError)
         alert('予約が完了しました！\n（カレンダーへの追加は失敗しましたが、予約は保存されています）')
       }
       
-      // 페이지 새로고침
+      console.log('🔄 Reloading page in 1.5 seconds...')
       setTimeout(() => {
         window.location.reload()
       }, 1500)
     } catch (error: unknown) {
-      console.error('Error:', error)
+      console.error('❌ Error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       alert('予約に失敗しました: ' + errorMessage)
     } finally {
@@ -425,7 +443,6 @@ const handleGuestLogout = async () => {
     )
   }
 
-  // 원타임 토큰이 이미 사용된 경우
   if (tokenAlreadyUsed) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
