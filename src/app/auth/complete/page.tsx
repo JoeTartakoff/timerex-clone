@@ -8,6 +8,7 @@ export default function AuthCompletePage() {
 
   useEffect(() => {
     console.log('=== Auth Complete Page ===')
+    console.log('All cookies:', document.cookie)
     
     // 쿠키에서 리디렉션 URL 가져오기
     const getCookie = (name: string) => {
@@ -22,25 +23,37 @@ export default function AuthCompletePage() {
     
     const redirectUrl = getCookie('auth_redirect_url')
     
-    console.log('All cookies:', document.cookie)
     console.log('Stored redirect URL from cookie:', redirectUrl)
     
     if (redirectUrl) {
       console.log('Redirecting to:', redirectUrl)
       
       // 쿠키 삭제
-      document.cookie = 'auth_redirect_url=; path=/; max-age=0; domain=' + window.location.hostname
-      document.cookie = 'auth_redirect_url=; path=/; max-age=0'
+      const isProduction = window.location.hostname !== 'localhost'
+      const deleteCookie = isProduction
+        ? 'auth_redirect_url=; path=/; max-age=0; Secure'
+        : 'auth_redirect_url=; path=/; max-age=0'
+      document.cookie = deleteCookie
       
-      // 리디렉션 (router.push 대신 window.location.href 사용)
-      setTimeout(() => {
-        window.location.href = redirectUrl
-      }, 100)
+      // 같은 origin인지 확인
+      try {
+        const url = new URL(redirectUrl)
+        if (url.origin === window.location.origin) {
+          console.log('Same origin, redirecting...')
+          window.location.href = redirectUrl
+          return
+        } else {
+          console.error('Cross-origin redirect blocked')
+          router.push('/dashboard')
+        }
+      } catch (error) {
+        console.error('Invalid URL:', error)
+        router.push('/dashboard')
+      }
     } else {
       console.log('No redirect URL found in cookie, going to dashboard')
-      setTimeout(() => {
-        router.push('/dashboard')
-      }, 100)
+      console.log('Available cookies:', document.cookie)
+      router.push('/dashboard')
     }
   }, [router])
 

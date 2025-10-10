@@ -298,14 +298,27 @@ const fetchScheduleData = useCallback(async (guestUserId?: string) => {
   }, [guestUser, fetchScheduleData])
 
 const handleGuestLogin = async () => {
-  // 현재 URL을 그대로 redirectTo로 사용 (쿼리 파라미터 포함)
+  // 현재 URL을 쿠키에 저장 (프로덕션용 설정 강화)
   const currentUrl = window.location.href
+  
+  // Secure 속성 추가 (HTTPS에서만 작동)
+  const isProduction = window.location.hostname !== 'localhost'
+  const cookieOptions = isProduction 
+    ? `auth_redirect_url=${encodeURIComponent(currentUrl)}; path=/; max-age=604800; SameSite=Lax; Secure`
+    : `auth_redirect_url=${encodeURIComponent(currentUrl)}; path=/; max-age=604800; SameSite=Lax`
+  
+  document.cookie = cookieOptions
+  
+  console.log('Saving redirect URL to cookie:', currentUrl)
+  console.log('Cookie options:', cookieOptions)
+  
+  // 쿠키 확인
+  console.log('Current cookies:', document.cookie)
   
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
       scopes: 'https://www.googleapis.com/auth/calendar',
-      redirectTo: currentUrl, // 현재 페이지로 다시 돌아오기
       queryParams: {
         access_type: 'offline',
         prompt: 'consent',
