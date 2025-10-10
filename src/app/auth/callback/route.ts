@@ -40,10 +40,8 @@ export async function GET(request: Request) {
 
       console.log('Session exchanged successfully')
       console.log('User:', data.user?.email)
-      console.log('Has provider token:', !!data.session?.provider_token)
-      console.log('Has refresh token:', !!data.session?.provider_refresh_token)
 
-      // 토큰 즉시 저장
+      // 토큰 저장
       if (data.user && data.session?.provider_token && data.session?.provider_refresh_token) {
         try {
           const expiresAt = new Date(Date.now() + (data.session.expires_in || 3600) * 1000).toISOString()
@@ -68,11 +66,21 @@ export async function GET(request: Request) {
         } catch (tokenError) {
           console.error('Failed to save tokens:', tokenError)
         }
-      } else {
-        console.log('Missing tokens in session')
       }
 
-      // 대시보드로 리디렉션
+      // 쿠키에서 리디렉션 URL 읽기
+      const redirectCookie = cookieStore.get('auth_redirect_url')
+      const redirectUrl = redirectCookie?.value ? decodeURIComponent(redirectCookie.value) : null
+      
+      console.log('Redirect URL from cookie:', redirectUrl)
+
+      if (redirectUrl && redirectUrl.startsWith(requestUrl.origin)) {
+        console.log('Redirecting to saved URL:', redirectUrl)
+        return NextResponse.redirect(redirectUrl)
+      }
+
+      // 리디렉션 URL이 없으면 대시보드로
+      console.log('No valid redirect URL, going to dashboard')
       return NextResponse.redirect(requestUrl.origin + '/dashboard')
     } catch (error) {
       console.error('Callback error:', error)
@@ -80,7 +88,6 @@ export async function GET(request: Request) {
     }
   }
 
-  // code가 없으면 로그인 페이지로
   console.log('No code provided, redirecting to login')
   return NextResponse.redirect(requestUrl.origin + '/login')
 }

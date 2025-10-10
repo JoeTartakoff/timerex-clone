@@ -19,24 +19,24 @@ export default function LoginPage() {
     }
   }
 
-  const handleGoogleLogin = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        scopes: 'https://www.googleapis.com/auth/calendar',
-        redirectTo: `${window.location.origin}/auth/callback`,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
+const handleGoogleLogin = async () => {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      scopes: 'https://www.googleapis.com/auth/calendar',
+      redirectTo: `${window.location.origin}/auth/callback`,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
       },
-    })
+    },
+  })
 
-    if (error) {
-      console.error('ログインエラー:', error.message)
-      alert('ログインに失敗しました')
-    }
+  if (error) {
+    console.error('ログインエラー:', error.message)
+    alert('ログインに失敗しました')
   }
+}
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">

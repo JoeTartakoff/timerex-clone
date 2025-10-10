@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { fetchCalendarEvents, calculateAvailableSlots } from '@/utils/calendar'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,80 +29,158 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
   }
 }
 
-async function getAvailableSlotsForUser(
-  userId: string,
-  dateStart: string,
-  dateEnd: string,
+async function fetchCalendarEvents(
+  accessToken: string,
+  timeMin: string,
+  timeMax: string
+) {
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+    `timeMin=${encodeURIComponent(timeMin)}&` +
+    `timeMax=${encodeURIComponent(timeMax)}&` +
+    `singleEvents=true&` +
+    `orderBy=startTime`
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json()
+    console.error('Calendar API error:', errorData)
+    throw new Error(`Failed to fetch calendar events: ${response.status}`)
+  }
+
+  const data = await response.json()
+  
+  return data.items?.map((item: any) => ({
+    id: item.id,
+    summary: item.summary || '予定',
+    start: item.start.dateTime || item.start.date,
+    end: item.end.dateTime || item.end.date,
+  })) || []
+}
+
+function calculateAvailableSlots(
+  events: any[],
+  dateRangeStart: string,
+  dateRangeEnd: string,
   slotDuration: number
 ) {
-  console.log('Getting slots for user:', userId)
-  
-  try {
-    // 사용자의 토큰 가져오기
-    const { data: tokens, error: tokensError } = await supabaseAdmin
-      .from('user_tokens')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle()
+  const availableSlots: any[] = []
+  const startDate = new Date(dateRangeStart)
+  const endDate = new Date(dateRangeEnd)
 
-    if (tokensError || !tokens) {
-      console.error('No tokens found for user:', userId, tokensError)
-      return null
-    }
+  const workingHoursStart = '09:00'
+  const workingHoursEnd = '18:00'
+  const lunchStart = '12:00'
+  const lunchEnd = '13:00'
 
-    console.log('Tokens found for user:', userId)
-
-    // Access token 갱신
-    let accessToken = tokens.access_token
-
-    const expiresAt = new Date(tokens.expires_at)
-    if (expiresAt < new Date()) {
-      const newAccessToken = await refreshAccessToken(tokens.refresh_token)
-      if (!newAccessToken) {
-        return null
-      }
-      accessToken = newAccessToken
-
-      await supabaseAdmin
-        .from('user_tokens')
-        .update({
-          access_token: newAccessToken,
-          expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', userId)
-    }
-
-    // Google Calendar에서 일정 가져오기
-    const timeMin = new Date(dateStart).toISOString()
-    const timeMax = new Date(dateEnd + 'T23:59:59').toISOString()
+  for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+    const dateStr = date.toISOString().split('T')[0]
     
-    const events = await fetchCalendarEvents(accessToken, timeMin, timeMax)
+    const dayEvents = events.filter(event => {
+      const eventStart = new Date(event.start)
+      const eventYear = eventStart.getFullYear()
+      const eventMonth = String(eventStart.getMonth() + 1).padStart(2, '0')
+      const eventDay = String(eventStart.getDate()).padStart(2, '0')
+      const eventDateStr = `${eventYear}-${eventMonth}-${eventDay}`
+      
+      return eventDateStr === dateStr
+    })
 
-    // 빈 시간대 계산
-    const availableSlots = calculateAvailableSlots(
-      events,
-      dateStart,
-      dateEnd,
-      '09:00',
-      '18:00',
-      '12:00',
-      '13:00',
+    const slots = generateTimeSlots(
+      dateStr,
+      workingHoursStart,
+      workingHoursEnd,
+      lunchStart,
+      lunchEnd,
       slotDuration
     )
 
-    return availableSlots
-  } catch (error) {
-    console.error('Error in getAvailableSlotsForUser:', error)
-    return null
+    slots.forEach(slot => {
+      const slotStart = new Date(`${slot.date}T${slot.startTime}`)
+      const slotEnd = new Date(`${slot.date}T${slot.endTime}`)
+
+      const isAvailable = !dayEvents.some(event => {
+        const eventStart = new Date(event.start)
+        const eventEnd = new Date(event.end)
+        
+        return (
+          (slotStart >= eventStart && slotStart < eventEnd) ||
+          (slotEnd > eventStart && slotEnd <= eventEnd) ||
+          (slotStart <= eventStart && slotEnd >= eventEnd) ||
+          (eventStart <= slotStart && eventEnd >= slotEnd)
+        )
+      })
+
+      if (isAvailable) {
+        availableSlots.push(slot)
+      }
+    })
   }
+
+  return availableSlots
+}
+
+function generateTimeSlots(
+  date: string,
+  startTime: string,
+  endTime: string,
+  lunchStart: string,
+  lunchEnd: string,
+  duration: number
+) {
+  const slots: any[] = []
+  const start = parseTime(startTime)
+  const end = parseTime(endTime)
+  const lunchStartMin = parseTime(lunchStart)
+  const lunchEndMin = parseTime(lunchEnd)
+
+  let current = start
+
+  while (current + duration <= end) {
+    const slotEnd = current + duration
+
+    const overlapLunch = (
+      (current >= lunchStartMin && current < lunchEndMin) ||
+      (slotEnd > lunchStartMin && slotEnd <= lunchEndMin) ||
+      (current <= lunchStartMin && slotEnd >= lunchEndMin)
+    )
+
+    if (!overlapLunch) {
+      slots.push({
+        date,
+        startTime: formatTime(current),
+        endTime: formatTime(slotEnd),
+      })
+    }
+
+    current += duration
+  }
+
+  return slots
+}
+
+function parseTime(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+function formatTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:00`
 }
 
 export async function POST(request: Request) {
   try {
     const { scheduleId, guestUserId } = await request.json()
 
-    console.log('Request received:', { scheduleId, guestUserId })
+    console.log('=== GET AVAILABLE SLOTS API ===')
+    console.log('Schedule ID:', scheduleId)
+    console.log('Guest User ID:', guestUserId)
 
     // 스케줄 정보 가져오기
     const { data: schedule, error: scheduleError } = await supabaseAdmin
@@ -114,86 +191,110 @@ export async function POST(request: Request) {
 
     if (scheduleError) {
       console.error('Schedule error:', scheduleError)
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Schedule not found',
-        useStaticSlots: true 
-      }, { status: 404 })
+      throw scheduleError
     }
 
-    console.log('Schedule found, host user:', schedule.user_id)
+    console.log('Schedule found:', schedule.title)
 
-    // 호스트의 빈 시간 가져오기
-    const hostSlots = await getAvailableSlotsForUser(
-      schedule.user_id,
+    // 호스트 토큰 가져오기
+    const { data: hostTokens, error: hostTokensError } = await supabaseAdmin
+      .from('user_tokens')
+      .select('*')
+      .eq('user_id', schedule.user_id)
+      .maybeSingle()
+
+    if (hostTokensError || !hostTokens) {
+      console.error('No tokens found for host:', schedule.user_id)
+      return NextResponse.json({ 
+        success: false, 
+        error: 'No host tokens found' 
+      }, { status: 400 })
+    }
+
+    console.log('Host tokens found')
+
+    // 호스트 토큰 갱신 확인
+    let hostAccessToken = hostTokens.access_token
+    const hostExpiresAt = new Date(hostTokens.expires_at)
+    
+    if (hostExpiresAt < new Date()) {
+      console.log('Host token expired, refreshing...')
+      const newToken = await refreshAccessToken(hostTokens.refresh_token)
+      if (!newToken) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Failed to refresh host token' 
+        }, { status: 400 })
+      }
+      hostAccessToken = newToken
+
+      await supabaseAdmin
+        .from('user_tokens')
+        .update({
+          access_token: newToken,
+          expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', schedule.user_id)
+    }
+
+    // 호스트 캘린더 이벤트 가져오기
+    const timeMin = new Date(schedule.date_range_start).toISOString()
+    const timeMax = new Date(schedule.date_range_end + 'T23:59:59').toISOString()
+    
+    console.log('Fetching host calendar events...')
+    const hostEvents = await fetchCalendarEvents(hostAccessToken, timeMin, timeMax)
+    console.log('Host events count:', hostEvents.length)
+
+    let allEvents = [...hostEvents]
+
+    // 게스트가 로그인한 경우 게스트 캘린더도 확인
+    if (guestUserId) {
+      console.log('Fetching guest calendar events...')
+      const { data: guestTokens } = await supabaseAdmin
+        .from('user_tokens')
+        .select('*')
+        .eq('user_id', guestUserId)
+        .maybeSingle()
+
+      if (guestTokens) {
+        let guestAccessToken = guestTokens.access_token
+        const guestExpiresAt = new Date(guestTokens.expires_at)
+        
+        if (guestExpiresAt < new Date()) {
+          const newToken = await refreshAccessToken(guestTokens.refresh_token)
+          if (newToken) {
+            guestAccessToken = newToken
+            await supabaseAdmin
+              .from('user_tokens')
+              .update({
+                access_token: newToken,
+                expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('user_id', guestUserId)
+          }
+        }
+
+        try {
+          const guestEvents = await fetchCalendarEvents(guestAccessToken, timeMin, timeMax)
+          console.log('Guest events count:', guestEvents.length)
+          allEvents = [...hostEvents, ...guestEvents]
+        } catch (error) {
+          console.error('Failed to fetch guest events:', error)
+        }
+      }
+    }
+
+    // 사용 가능한 슬롯 계산
+    const availableSlots = calculateAvailableSlots(
+      allEvents,
       schedule.date_range_start,
       schedule.date_range_end,
       schedule.time_slot_duration
     )
 
-    console.log('Host slots count:', hostSlots?.length || 0)
-
-    if (!hostSlots) {
-      console.log('Failed to get host slots, using static slots')
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Failed to get host availability',
-        useStaticSlots: true 
-      })
-    }
-
-    let finalSlots = hostSlots
-
-    // 게스트가 로그인한 경우, 게스트의 빈 시간도 확인
-    if (guestUserId) {
-      console.log('Guest logged in, getting guest slots...')
-      
-      const guestSlots = await getAvailableSlotsForUser(
-        guestUserId,
-        schedule.date_range_start,
-        schedule.date_range_end,
-        schedule.time_slot_duration
-      )
-
-      console.log('Guest slots count:', guestSlots?.length || 0)
-
-      if (guestSlots) {
-        // 호스트와 게스트 모두 비어있는 시간만 필터링 (교집합)
-        finalSlots = hostSlots.filter(hostSlot => 
-          guestSlots.some(guestSlot => 
-            hostSlot.date === guestSlot.date &&
-            hostSlot.startTime === guestSlot.startTime &&
-            hostSlot.endTime === guestSlot.endTime
-          )
-        )
-        console.log('Intersection slots count:', finalSlots.length)
-      } else {
-        console.log('Failed to get guest slots, using host slots only')
-      }
-    }
-
-    // 이미 예약된 시간대 가져오기
-    const { data: bookings, error: bookingsError } = await supabaseAdmin
-      .from('bookings')
-      .select('booking_date, start_time, end_time')
-      .eq('schedule_id', scheduleId)
-      .eq('status', 'confirmed')
-
-    if (bookingsError) {
-      console.error('Bookings error:', bookingsError)
-    }
-
-    // 예약된 시간 제외
-    const availableSlots = finalSlots.filter(slot => {
-      return !bookings?.some(
-        booking =>
-          booking.booking_date === slot.date &&
-          booking.start_time === slot.startTime &&
-          booking.end_time === slot.endTime
-      )
-    })
-
-    console.log('Final available slots count:', availableSlots.length)
+    console.log('Available slots count:', availableSlots.length)
 
     return NextResponse.json({ 
       success: true,
@@ -203,15 +304,12 @@ export async function POST(request: Request) {
   } catch (error: unknown) {
     console.error('=== API ERROR ===')
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    const errorStack = error instanceof Error ? error.stack : undefined
-    console.error('Error message:', errorMessage)
-    console.error('Error stack:', errorStack)
+    console.error('Error:', errorMessage)
     
     return NextResponse.json(
       { 
         success: false, 
-        error: errorMessage,
-        useStaticSlots: true 
+        error: errorMessage
       },
       { status: 500 }
     )

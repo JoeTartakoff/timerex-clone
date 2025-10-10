@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { saveUserTokens } from '@/utils/tokens'
 
 interface Schedule {
   id: string
@@ -15,6 +14,9 @@ interface Schedule {
   date_range_end: string
   time_slot_duration: number
   created_at: string
+  is_one_time_link: boolean
+  is_used: boolean
+  used_at: string | null
 }
 
 export default function DashboardPage() {
@@ -27,53 +29,47 @@ export default function DashboardPage() {
     checkUser()
   }, [])
 
-const checkUser = async () => {
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
-    router.push('/login')
-    return
-  }
-  
-  setUser(user)
-
-  // 토큰 저장 - 직접 upsert
-  const { data: { session } } = await supabase.auth.getSession()
-  if (session?.provider_token && session?.provider_refresh_token) {
-    try {
-      const expiresAt = new Date(Date.now() + (session.expires_in || 3600) * 1000).toISOString()
-      
-      const { error: tokenError } = await supabase
-        .from('user_tokens')
-        .upsert({
-          user_id: user.id,
-          access_token: session.provider_token,
-          refresh_token: session.provider_refresh_token,
-          expires_at: expiresAt,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id'
-        })
-
-      if (tokenError) {
-        console.error('Failed to save tokens:', tokenError)
-      } else {
-        console.log('Tokens saved successfully!')
-      }
-    } catch (error) {
-      console.error('Failed to save tokens:', error)
+  const checkUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      router.push('/login')
+      return
     }
-  }
+    
+    setUser(user)
 
-  await fetchSchedules(user.id)
-  setLoading(false)
-}
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.provider_token && session?.provider_refresh_token) {
+      try {
+        const expiresAt = new Date(Date.now() + (session.expires_in || 3600) * 1000).toISOString()
+        
+        await supabase
+          .from('user_tokens')
+          .upsert({
+            user_id: user.id,
+            access_token: session.provider_token,
+            refresh_token: session.provider_refresh_token,
+            expires_at: expiresAt,
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'user_id'
+          })
+      } catch (error) {
+        console.error('Failed to save tokens:', error)
+      }
+    }
+
+    await fetchSchedules(user.id)
+    setLoading(false)
+  }
 
   const fetchSchedules = async (userId: string) => {
     const { data, error } = await supabase
       .from('schedules')
       .select('*')
       .eq('user_id', userId)
+      .eq('is_one_time_link', false) // 원타임 전용 스케줄 제외
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -89,10 +85,18 @@ const checkUser = async () => {
     router.push('/login')
   }
 
-  const copyShareLink = (shareLink: string) => {
+  const copyOneTimeLink = (shareLink: string) => {
+    // 고유한 토큰 생성
+    const oneTimeToken = crypto.randomUUID()
+    const url = `${window.location.origin}/book/${shareLink}?mode=onetime&token=${oneTimeToken}`
+    navigator.clipboard.writeText(url)
+    alert('ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。')
+  }
+
+  const copyFixedLink = (shareLink: string) => {
     const url = `${window.location.origin}/book/${shareLink}`
     navigator.clipboard.writeText(url)
-    alert('共有リンクをコピーしました！')
+    alert('固定リンクをコピーしました！\n何度でも予約可能なリンクです。')
   }
 
   const deleteSchedule = async (id: string) => {
@@ -175,15 +179,17 @@ const checkUser = async () => {
                   <div key={schedule.id} className="px-6 py-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <h3 className="text-lg font-medium text-gray-900">
-                          {schedule.title}
-                        </h3>
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="text-lg font-medium text-gray-900">
+                            {schedule.title}
+                          </h3>
+                        </div>
                         {schedule.description && (
-                          <p className="mt-1 text-sm text-gray-500">
+                          <p className="text-sm text-gray-500 mb-2">
                             {schedule.description}
                           </p>
                         )}
-                        <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500">
+                        <div className="flex items-center space-x-4 text-sm text-gray-500">
                           <span>
                             📅 {schedule.date_range_start} ～ {schedule.date_range_end}
                           </span>
@@ -192,16 +198,23 @@ const checkUser = async () => {
                           </span>
                         </div>
                       </div>
-                      <div className="ml-4 flex space-x-2">
+                      
+                      <div className="ml-4 flex items-center gap-2">
                         <button
-                          onClick={() => copyShareLink(schedule.share_link)}
-                          className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                          onClick={() => copyOneTimeLink(schedule.share_link)}
+                          className="px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
                         >
-                          リンクコピー
+                          ワンタイムリンクコピー
+                        </button>
+                        <button
+                          onClick={() => copyFixedLink(schedule.share_link)}
+                          className="px-3 py-2 border border-blue-300 bg-blue-50 rounded-md text-sm font-medium text-blue-700 hover:bg-blue-100 whitespace-nowrap"
+                        >
+                          固定リンクコピー
                         </button>
                         <button
                           onClick={() => deleteSchedule(schedule.id)}
-                          className="px-3 py-2 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-white hover:bg-red-50"
+                          className="px-3 py-2 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-white hover:bg-red-50 whitespace-nowrap"
                         >
                           削除
                         </button>

@@ -3,14 +3,12 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { fetchCalendarEvents, calculateAvailableSlots } from '@/utils/calendar'
 import { v4 as uuidv4 } from 'uuid'
 
 export default function NewSchedulePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [user, setUser] = useState<any>(null)
-  const [accessToken, setAccessToken] = useState<string>('')
   
   const [formData, setFormData] = useState({
     title: '',
@@ -33,12 +31,6 @@ export default function NewSchedulePage() {
     }
 
     setUser(user)
-
-    // Access Token 가져오기
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.provider_token) {
-      setAccessToken(session.provider_token)
-    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -46,33 +38,14 @@ export default function NewSchedulePage() {
     setLoading(true)
 
     try {
-      if (!accessToken) {
-        throw new Error('Google認証が必要です')
+      if (!user) {
+        throw new Error('ログインが必要です')
       }
 
-      // Google Calendar에서 일정 가져오기
-      const timeMin = new Date(formData.dateRangeStart).toISOString()
-      const timeMax = new Date(formData.dateRangeEnd + 'T23:59:59').toISOString()
-      
-      const events = await fetchCalendarEvents(accessToken, timeMin, timeMax)
-
-      // 빈 시간대 계산
-      const availableSlots = calculateAvailableSlots(
-        events,
-        formData.dateRangeStart,
-        formData.dateRangeEnd,
-        '09:00',
-        '18:00',
-        '12:00',
-        '13:00',
-        formData.timeSlotDuration
-      )
-
-      // 공유 링크 생성
       const shareLink = uuidv4()
 
-      // Supabase에 스케줄 저장
-      const { data: schedule, error: scheduleError } = await supabase
+      // 스케줄만 저장 (슬롯은 예약 페이지에서 실시간으로 생성)
+      const { error: scheduleError } = await supabase
         .from('schedules')
         .insert({
           user_id: user.id,
@@ -82,25 +55,11 @@ export default function NewSchedulePage() {
           date_range_start: formData.dateRangeStart,
           date_range_end: formData.dateRangeEnd,
           time_slot_duration: formData.timeSlotDuration,
+          is_one_time_link: false,
+          is_used: false,
         })
-        .select()
-        .single()
 
       if (scheduleError) throw scheduleError
-
-      // 가능한 시간대 저장
-      const slotsToInsert = availableSlots.map(slot => ({
-        schedule_id: schedule.id,
-        date: slot.date,
-        start_time: slot.startTime,
-        end_time: slot.endTime,
-      }))
-
-      const { error: slotsError } = await supabase
-        .from('availability_slots')
-        .insert(slotsToInsert)
-
-      if (slotsError) throw slotsError
 
       alert('スケジュールを作成しました！')
       router.push('/dashboard')
@@ -222,6 +181,7 @@ export default function NewSchedulePage() {
                 <li>営業時間: 9:00 - 18:00</li>
                 <li>休憩時間: 12:00 - 13:00</li>
                 <li>Googleカレンダーの予定と重複しない時間のみ予約可能</li>
+                <li>予約時にリアルタイムでカレンダーを確認します</li>
               </ul>
             </div>
 

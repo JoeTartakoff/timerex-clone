@@ -1,6 +1,52 @@
+'use client'
+
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
 export default function Home() {
+  const router = useRouter()
+
+  useEffect(() => {
+    // URL 해시에 access_token이 있으면 로그인 후 리디렉션 처리
+    const hash = window.location.hash
+    if (hash && hash.includes('access_token')) {
+      console.log('=== Auth tokens detected in URL ===')
+      
+      // 쿠키에서 리디렉션 URL 가져오기
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`
+        const parts = value.split(`; ${name}=`)
+        if (parts.length === 2) {
+          const cookieValue = parts.pop()?.split(';').shift()
+          return cookieValue ? decodeURIComponent(cookieValue) : null
+        }
+        return null
+      }
+      
+      const redirectUrl = getCookie('auth_redirect_url')
+      console.log('Redirect URL from cookie:', redirectUrl)
+      
+      if (redirectUrl) {
+        // 쿠키 삭제
+        document.cookie = 'auth_redirect_url=; path=/; max-age=0'
+        
+        console.log('Redirecting to:', redirectUrl)
+        
+        // 해시를 제거하고 저장된 URL로 리디렉션
+        window.history.replaceState(null, '', '/')
+        setTimeout(() => {
+          window.location.href = redirectUrl
+        }, 100)
+      } else {
+        // 리디렉션 URL이 없으면 대시보드로
+        console.log('No redirect URL, going to dashboard')
+        window.history.replaceState(null, '', '/')
+        router.push('/dashboard')
+      }
+    }
+  }, [router])
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="max-w-md w-full space-y-8 p-8">

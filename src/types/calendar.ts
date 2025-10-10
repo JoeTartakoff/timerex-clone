@@ -20,4 +20,7 @@ export interface Schedule {
   dateRangeEnd: string
   timeSlotDuration: number
   availableSlots?: TimeSlot[]
+  is_one_time_link?: boolean  // 추가
+  is_used?: boolean            // 추가
+  used_at?: string             // 추가
 }

@@ -12,17 +12,14 @@ interface Schedule {
   date_range_end: string
   time_slot_duration: number
   user_id: string
+  is_one_time_link: boolean
+  is_used: boolean
+  used_at: string | null
 }
 
 interface AvailabilitySlot {
   id: string
   date: string
-  start_time: string
-  end_time: string
-}
-
-interface Booking {
-  booking_date: string
   start_time: string
   end_time: string
 }
@@ -42,15 +39,18 @@ export default function BookingPage() {
   const [loading, setLoading] = useState(true)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [availableSlots, setAvailableSlots] = useState<AvailabilitySlot[]>([])
-  const [bookings, setBookings] = useState<Booking[]>([])
   const [selectedSlot, setSelectedSlot] = useState<AvailabilitySlot | null>(null)
   const [guestInfo, setGuestInfo] = useState({
     name: '',
     email: '',
+    company: '',
   })
   const [submitting, setSubmitting] = useState(false)
   const [guestUser, setGuestUser] = useState<User | null>(null)
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
+  const [isOneTimeMode, setIsOneTimeMode] = useState(false)
+  const [oneTimeToken, setOneTimeToken] = useState<string | null>(null)
+  const [tokenAlreadyUsed, setTokenAlreadyUsed] = useState(false)
 
   const checkGuestUser = useCallback(async () => {
     try {
@@ -65,62 +65,102 @@ export default function BookingPage() {
     }
   }, [])
 
-  // 저장된 슬롯 로드 (폴백용)
-  const loadStaticSlots = useCallback(async (scheduleId: string) => {
-    // 가능한 시간대 가져오기
-    const { data: slotsData, error: slotsError } = await supabase
-      .from('availability_slots')
-      .select('*')
-      .eq('schedule_id', scheduleId)
-      .order('date', { ascending: true })
-      .order('start_time', { ascending: true })
-
-    if (slotsError) throw slotsError
-
-    setAvailableSlots(slotsData || [])
-
-    // 이미 예약된 시간대 가져오기
-    const { data: bookingsData, error: bookingsError } = await supabase
+  const checkTokenUsed = useCallback(async (token: string) => {
+    const { data, error } = await supabase
       .from('bookings')
-      .select('booking_date, start_time, end_time')
-      .eq('schedule_id', scheduleId)
-      .eq('status', 'confirmed')
+      .select('id')
+      .eq('one_time_token', token)
+      .maybeSingle()
 
-    if (bookingsError) throw bookingsError
+    if (error) {
+      console.error('Error checking token:', error)
+      return
+    }
 
-    setBookings(bookingsData || [])
+    if (data) {
+      console.log('Token already used:', token)
+      setTokenAlreadyUsed(true)
+    }
+  }, [])
+
+  const generateDefaultSlots = useCallback((
+    dateRangeStart: string,
+    dateRangeEnd: string,
+    slotDuration: number
+  ) => {
+    const slots: AvailabilitySlot[] = []
+    const startDate = new Date(dateRangeStart)
+    const endDate = new Date(dateRangeEnd)
+
+    for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+      const dateStr = date.toISOString().split('T')[0]
+      
+      // 9:00 - 18:00, 점심시간 12:00 - 13:00 제외
+      const workStart = 9 * 60 // 9:00 in minutes
+      const workEnd = 18 * 60 // 18:00 in minutes
+      const lunchStart = 12 * 60 // 12:00 in minutes
+      const lunchEnd = 13 * 60 // 13:00 in minutes
+
+      let current = workStart
+
+      while (current + slotDuration <= workEnd) {
+        const slotEnd = current + slotDuration
+
+        // 점심시간과 겹치는지 확인
+        const overlapLunch = (
+          (current >= lunchStart && current < lunchEnd) ||
+          (slotEnd > lunchStart && slotEnd <= lunchEnd) ||
+          (current <= lunchStart && slotEnd >= lunchEnd)
+        )
+
+        if (!overlapLunch) {
+          const hours = Math.floor(current / 60)
+          const mins = current % 60
+          const startTime = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:00`
+          
+          const endHours = Math.floor(slotEnd / 60)
+          const endMins = slotEnd % 60
+          const endTime = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}:00`
+
+          slots.push({
+            id: `${dateStr}-${current}`,
+            date: dateStr,
+            start_time: startTime,
+            end_time: endTime,
+          })
+        }
+
+        current += slotDuration
+      }
+    }
+
+    return slots
   }, [])
 
   const fetchScheduleData = useCallback(async (guestUserId?: string) => {
     try {
       console.log('=== fetchScheduleData START ===')
       console.log('shareLink:', shareLink)
-      console.log('guestUserId param:', guestUserId)
-      console.log('guestUser state:', guestUser?.id)
       
       setIsLoadingSlots(true)
       
-      // 스케줄 정보 가져오기
       const { data: scheduleData, error: scheduleError } = await supabase
         .from('schedules')
         .select('*')
         .eq('share_link', shareLink)
         .single()
 
-      console.log('Schedule query result:')
-      console.log('- data:', scheduleData)
-      console.log('- error:', scheduleError)
+      console.log('Schedule query result:', scheduleData)
 
       if (scheduleError) throw scheduleError
 
       setSchedule(scheduleData)
 
-      // 실시간으로 Google Calendar에서 가능한 시간 가져오기
+      // 실시간으로 Google Calendar에서 가능한 시간 가져오기 시도
       try {
         const finalGuestUserId = guestUserId || guestUser?.id
-        console.log('Final guest user ID for API:', finalGuestUserId)
+        console.log('Trying to fetch from Google Calendar API...')
         
-        console.log('Fetching available slots...')
         const response = await fetch('/api/calendar/get-available-slots', {
           method: 'POST',
           headers: {
@@ -132,40 +172,35 @@ export default function BookingPage() {
           }),
         })
 
-        console.log('API response status:', response.status)
-        
-        // 응답이 비어있는지 확인
-        const text = await response.text()
-        console.log('API response text length:', text.length)
-        
-        if (!text) {
-          console.error('Empty response from API')
-          throw new Error('Empty API response')
+        if (response.ok) {
+          const result = await response.json()
+          
+          if (result.success && result.slots && result.slots.length > 0) {
+            const slotsWithId = result.slots.map((slot: { date: string; startTime: string; endTime: string }, index: number) => ({
+              id: `${slot.date}-${slot.startTime}-${index}`,
+              date: slot.date,
+              start_time: slot.startTime,
+              end_time: slot.endTime,
+            }))
+            console.log('Using Calendar API slots:', slotsWithId.length)
+            setAvailableSlots(slotsWithId)
+            setIsLoadingSlots(false)
+            setLoading(false)
+            return
+          }
         }
         
-        const result = JSON.parse(text)
-        console.log('API result:', result)
-
-        if (result.success && result.slots) {
-          // 실시간 슬롯 사용
-          const slotsWithId = result.slots.map((slot: { date: string; startTime: string; endTime: string }, index: number) => ({
-            id: `${slot.date}-${slot.startTime}-${index}`,
-            date: slot.date,
-            start_time: slot.startTime,
-            end_time: slot.endTime,
-          }))
-          console.log('Setting available slots:', slotsWithId.length)
-          setAvailableSlots(slotsWithId)
-          setBookings([]) // 이미 필터링됨
-        } else {
-          console.log('API failed, loading static slots')
-          // API 실패 시 저장된 슬롯 사용 (폴백)
-          await loadStaticSlots(scheduleData.id)
-        }
+        throw new Error('Calendar API failed or returned no slots')
       } catch (error) {
-        console.error('Failed to get real-time slots, using static slots:', error)
-        // API 실패 시 저장된 슬롯 사용 (폴백)
-        await loadStaticSlots(scheduleData.id)
+        console.log('Calendar API failed, using default slots:', error)
+        // API 실패 시 기본 시간대 생성
+        const defaultSlots = generateDefaultSlots(
+          scheduleData.date_range_start,
+          scheduleData.date_range_end,
+          scheduleData.time_slot_duration
+        )
+        console.log('Generated default slots:', defaultSlots.length)
+        setAvailableSlots(defaultSlots)
       }
     } catch (error) {
       console.error('Error in fetchScheduleData:', error)
@@ -175,11 +210,25 @@ export default function BookingPage() {
       setLoading(false)
       setIsLoadingSlots(false)
     }
-  }, [shareLink, guestUser?.id, loadStaticSlots])
+  }, [shareLink, guestUser?.id, generateDefaultSlots])
 
   useEffect(() => {
     console.log('=== useEffect triggered ===')
     console.log('shareLink:', shareLink)
+    
+    // URL 파라미터에서 mode와 token 확인
+    const urlParams = new URLSearchParams(window.location.search)
+    const mode = urlParams.get('mode')
+    const token = urlParams.get('token')
+    
+    if (mode === 'onetime' && token) {
+      setIsOneTimeMode(true)
+      setOneTimeToken(token)
+      console.log('One-time mode activated with token:', token)
+      
+      // 이 토큰으로 이미 예약했는지 확인
+      checkTokenUsed(token)
+    }
     
     const init = async () => {
       try {
@@ -192,7 +241,7 @@ export default function BookingPage() {
     }
     
     init()
-  }, [shareLink, checkGuestUser, fetchScheduleData])
+  }, [shareLink, checkGuestUser, fetchScheduleData, checkTokenUsed])
 
   useEffect(() => {
     if (!guestUser) return
@@ -200,25 +249,17 @@ export default function BookingPage() {
     const saveAndReload = async () => {
       console.log('=== Guest Login Detected ===')
       console.log('Guest user ID:', guestUser.id)
-      console.log('Guest email:', guestUser.email)
       
-      // 게스트 정보 자동 입력
       setGuestInfo({
         name: guestUser.user_metadata?.full_name || guestUser.email?.split('@')[0] || '',
         email: guestUser.email || '',
+        company: '',
       })
       
       try {
-        // 세션에서 토큰 가져오기
         const { data: { session } } = await supabase.auth.getSession()
-        console.log('Session check:', {
-          hasSession: !!session,
-          hasProviderToken: !!session?.provider_token,
-          hasRefreshToken: !!session?.provider_refresh_token
-        })
         
         if (session?.provider_token && session?.provider_refresh_token) {
-          // 토큰 저장
           const expiresAt = new Date(Date.now() + (session.expires_in || 3600) * 1000).toISOString()
           
           const { error: tokenError } = await supabase
@@ -240,7 +281,6 @@ export default function BookingPage() {
           }
         }
 
-        // 게스트 ID를 명시적으로 전달하여 슬롯 재로드
         console.log('Reloading slots with guest ID:', guestUser.id)
         await fetchScheduleData(guestUser.id)
       } catch (error) {
@@ -251,42 +291,35 @@ export default function BookingPage() {
     saveAndReload()
   }, [guestUser, fetchScheduleData])
 
-  const handleGuestLogin = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        scopes: 'https://www.googleapis.com/auth/calendar',
-        redirectTo: `${window.location.origin}/book/${shareLink}`,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
+const handleGuestLogin = async () => {
+  // 현재 URL을 그대로 redirectTo로 사용 (쿼리 파라미터 포함)
+  const currentUrl = window.location.href
+  
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      scopes: 'https://www.googleapis.com/auth/calendar',
+      redirectTo: currentUrl, // 현재 페이지로 다시 돌아오기
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
       },
-    })
+    },
+  })
 
-    if (error) {
-      console.error('ログインエラー:', error.message)
-      alert('ログインに失敗しました')
-    }
+  if (error) {
+    console.error('ログインエラー:', error.message)
+    alert('ログインに失敗しました')
   }
+}
 
-  const handleGuestLogout = async () => {
+const handleGuestLogout = async () => {
     await supabase.auth.signOut()
     setGuestUser(null)
     await fetchScheduleData()
   }
 
-  const isSlotBooked = (slot: AvailabilitySlot) => {
-    return bookings.some(
-      (booking) =>
-        booking.booking_date === slot.date &&
-        booking.start_time === slot.start_time &&
-        booking.end_time === slot.end_time
-    )
-  }
-
   const handleSlotSelect = (slot: AvailabilitySlot) => {
-    if (isSlotBooked(slot)) return
     setSelectedSlot(slot)
   }
 
@@ -297,24 +330,29 @@ export default function BookingPage() {
     setSubmitting(true)
 
     try {
-      // 예약 저장
+      // bookings 테이블에 저장 (원타임 토큰 추적용)
       const { error: bookingError } = await supabase
         .from('bookings')
         .insert({
           schedule_id: schedule.id,
           guest_name: guestInfo.name,
           guest_email: guestInfo.email,
+          company: guestInfo.company,
           booking_date: selectedSlot.date,
           start_time: selectedSlot.start_time,
           end_time: selectedSlot.end_time,
           status: 'confirmed',
+          is_one_time_booking: isOneTimeMode,
+          one_time_token: isOneTimeMode ? oneTimeToken : null,
         })
 
       if (bookingError) throw bookingError
 
-      // Google Calendar에 이벤트 추가 (호스트 + 게스트)
+      console.log('Booking record created successfully')
+
+      // Google Calendar에 이벤트 추가 시도 (실패해도 계속 진행)
       try {
-        console.log('Calling calendar API...')
+        console.log('Trying to add to Google Calendar...')
         const response = await fetch('/api/calendar/add-event', {
           method: 'POST',
           headers: {
@@ -327,27 +365,28 @@ export default function BookingPage() {
             endTime: selectedSlot.end_time,
             guestName: guestInfo.name,
             guestEmail: guestInfo.email,
+            guestCompany: guestInfo.company,
             guestUserId: guestUser?.id,
           }),
         })
         
-        const result = await response.json()
-        console.log('Calendar API response:', result)
-        
-        if (!response.ok) {
-          console.error('Calendar API failed:', result)
+        if (response.ok) {
+          const result = await response.json()
+          console.log('Calendar API success:', result)
+          alert('予約が完了しました！\nカレンダーに追加されました。')
+        } else {
+          console.log('Calendar API failed, but booking is saved')
+          alert('予約が完了しました！\n（カレンダーへの追加は失敗しましたが、予約は保存されています）')
         }
       } catch (calendarError) {
         console.error('Calendar event creation failed:', calendarError)
-        // 캘린더 추가 실패해도 예약은 완료된 것으로 처리
+        alert('予約が完了しました！\n（カレンダーへの追加は失敗しましたが、予約は保存されています）')
       }
       
-      alert('予約が完了しました！\nカレンダーに追加されました。')
-      
       // 페이지 새로고침
-      setSelectedSlot(null)
-      setGuestInfo({ name: '', email: '' })
-      await fetchScheduleData()
+      setTimeout(() => {
+        window.location.reload()
+      }, 1500)
     } catch (error: unknown) {
       console.error('Error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -380,7 +419,34 @@ export default function BookingPage() {
     )
   }
 
-  // 날짜별로 슬롯 그룹화
+  // 원타임 토큰이 이미 사용된 경우
+  if (tokenAlreadyUsed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-8">
+          <div className="text-center">
+            <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-yellow-100 mb-4">
+              <svg className="h-10 w-10 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-3">
+              既に予約が完了したリンクです
+            </h2>
+            <p className="text-gray-600 mb-2">
+              このリンクはワンタイムリンクのため、既に使用されました。
+            </p>
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <p className="text-sm text-gray-600">
+                新しい予約が必要な場合は、ホストに連絡して新しいリンクを取得してください。
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const slotsByDate = availableSlots.reduce((acc, slot) => {
     if (!acc[slot.date]) {
       acc[slot.date] = []
@@ -392,20 +458,33 @@ export default function BookingPage() {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* ヘッダー */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">
-            {schedule.title}
-          </h1>
-          {schedule.description && (
-            <p className="text-gray-600">{schedule.description}</p>
-          )}
-          <div className="mt-4 flex items-center space-x-4 text-sm text-gray-500">
-            <span>📅 {schedule.date_range_start} ～ {schedule.date_range_end}</span>
-            <span>⏱️ {schedule.time_slot_duration}分</span>
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                {schedule.title}
+              </h1>
+              {schedule.description && (
+                <p className="text-gray-600">{schedule.description}</p>
+              )}
+              <div className="mt-4 flex items-center space-x-4 text-sm text-gray-500">
+                <span>📅 {schedule.date_range_start} ～ {schedule.date_range_end}</span>
+                <span>⏱️ {schedule.time_slot_duration}分</span>
+              </div>
+            </div>
+            
+            {isOneTimeMode && (
+              <div className="ml-4">
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  ワンタイムリンク
+                </span>
+              </div>
+            )}
           </div>
 
-          {/* 게스트 로그인 섹션 */}
           <div className="mt-6 pt-6 border-t border-gray-200">
             {guestUser ? (
               <div className="flex items-center justify-between bg-blue-50 p-4 rounded-lg">
@@ -420,7 +499,7 @@ export default function BookingPage() {
                       Googleカレンダーと連携中
                     </p>
                     <p className="text-xs text-blue-700">
-                      {guestUser.email} - お互いに空いている時間のみ表示
+                      {guestUser.email}
                     </p>
                   </div>
                 </div>
@@ -478,7 +557,6 @@ export default function BookingPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 時間選択 */}
           <div className="lg:col-span-2">
             <div className="bg-white shadow rounded-lg p-6">
               <h2 className="text-lg font-medium text-gray-900 mb-4">
@@ -505,19 +583,15 @@ export default function BookingPage() {
                       </h3>
                       <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                         {slots.map((slot) => {
-                          const booked = isSlotBooked(slot)
                           const selected = selectedSlot?.id === slot.id
 
                           return (
                             <button
                               key={slot.id}
                               onClick={() => handleSlotSelect(slot)}
-                              disabled={booked}
                               className={`
                                 py-2 px-3 rounded-md text-sm font-medium transition-colors
-                                ${booked
-                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                  : selected
+                                ${selected
                                   ? 'bg-blue-600 text-white'
                                   : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
                                 }
@@ -535,7 +609,6 @@ export default function BookingPage() {
             </div>
           </div>
 
-          {/* 予約フォーム */}
           <div className="lg:col-span-1">
             <div className="bg-white shadow rounded-lg p-6 sticky top-8">
               <h2 className="text-lg font-medium text-gray-900 mb-4">
@@ -555,6 +628,17 @@ export default function BookingPage() {
                       {selectedSlot.start_time.slice(0, 5)} - {selectedSlot.end_time.slice(0, 5)}
                     </p>
                   </div>
+
+                  {isOneTimeMode && (
+                    <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
+                      <p className="text-xs text-yellow-800 font-medium">
+                        ⚠️ ワンタイムリンク
+                      </p>
+                      <p className="text-xs text-yellow-700 mt-1">
+                        予約完了後、このリンクは無効化されます
+                      </p>
+                    </div>
+                  )}
 
                   {guestUser && (
                     <div className="bg-green-50 p-3 rounded-md">
@@ -606,6 +690,22 @@ export default function BookingPage() {
                         Googleアカウントから自動入力
                       </p>
                     )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      会社名（任意）
+                    </label>
+                    <input
+                      type="text"
+                      value={guestInfo.company}
+                      onChange={(e) => setGuestInfo({ ...guestInfo, company: e.target.value })}
+                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="株式会社〇〇"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      入力は任意です
+                    </p>
                   </div>
 
                   <button

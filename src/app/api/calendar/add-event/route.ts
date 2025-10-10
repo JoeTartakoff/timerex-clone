@@ -58,7 +58,9 @@ export async function POST(request: Request) {
   try {
     const { scheduleId, bookingDate, startTime, endTime, guestName, guestEmail, guestUserId } = await request.json()
 
-    console.log('Add event request:', { scheduleId, guestUserId })
+    console.log('=== ADD EVENT API ===')
+    console.log('Schedule ID:', scheduleId)
+    console.log('Guest User ID:', guestUserId)
 
     // 스케줄 정보와 호스트 정보 가져오기
     const { data: schedule, error: scheduleError } = await supabaseAdmin
@@ -67,7 +69,12 @@ export async function POST(request: Request) {
       .eq('id', scheduleId)
       .single()
 
-    if (scheduleError) throw scheduleError
+    if (scheduleError) {
+      console.error('Schedule error:', scheduleError)
+      throw scheduleError
+    }
+
+    console.log('Schedule found:', schedule.title)
 
     // 호스트의 토큰 가져오기
     const { data: hostTokens, error: hostTokensError } = await supabaseAdmin
@@ -78,13 +85,17 @@ export async function POST(request: Request) {
 
     if (hostTokensError || !hostTokens) {
       console.error('No tokens found for host')
-      return NextResponse.json({ success: false, error: 'No host tokens' })
+      return NextResponse.json({ success: false, error: 'No host tokens' }, { status: 400 })
     }
+
+    console.log('Host tokens found')
 
     // 호스트 access token 갱신
     let hostAccessToken = hostTokens.access_token
     const hostExpiresAt = new Date(hostTokens.expires_at)
+    
     if (hostExpiresAt < new Date()) {
+      console.log('Host token expired, refreshing...')
       const newToken = await refreshAccessToken(hostTokens.refresh_token)
       if (!newToken) throw new Error('Failed to refresh host token')
       hostAccessToken = newToken
@@ -145,9 +156,9 @@ export async function POST(request: Request) {
         .maybeSingle()
 
       if (guestTokens) {
-        // 게스트 access token 갱신
         let guestAccessToken = guestTokens.access_token
         const guestExpiresAt = new Date(guestTokens.expires_at)
+        
         if (guestExpiresAt < new Date()) {
           const newToken = await refreshAccessToken(guestTokens.refresh_token)
           if (newToken) {
@@ -163,7 +174,6 @@ export async function POST(request: Request) {
           }
         }
 
-        // 게스트용 이벤트 데이터 (설명 변경)
         const guestEventData = {
           ...eventData,
           summary: `${schedule.title}`,
@@ -175,10 +185,7 @@ export async function POST(request: Request) {
           console.log('Guest event created:', (guestEvent as { id: string }).id)
         } catch (error) {
           console.error('Failed to add event to guest calendar:', error)
-          // 게스트 캘린더 추가 실패해도 계속 진행
         }
-      } else {
-        console.log('No tokens found for guest')
       }
     }
 
@@ -186,12 +193,12 @@ export async function POST(request: Request) {
       success: true,
       hostEventId: (hostEvent as { id: string }).id,
       guestEventId: guestEvent ? (guestEvent as { id: string }).id : null,
-      hostEventLink: (hostEvent as { htmlLink: string }).htmlLink,
-      guestEventLink: guestEvent ? (guestEvent as { htmlLink: string }).htmlLink : null
     })
   } catch (error: unknown) {
-    console.error('Error adding calendar event:', error)
+    console.error('=== ADD EVENT ERROR ===')
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('Error:', errorMessage)
+    
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }
