@@ -180,7 +180,7 @@ export async function POST(request: Request) {
 
     console.log('=== GET AVAILABLE SLOTS API ===')
     console.log('Schedule ID:', scheduleId)
-    console.log('Guest User ID:', guestUserId)
+    console.log('🔍 Guest User ID:', guestUserId)
 
     // 스케줄 정보 가져오기
     const { data: schedule, error: scheduleError } = await supabaseAdmin
@@ -244,26 +244,35 @@ export async function POST(request: Request) {
     
     console.log('Fetching host calendar events...')
     const hostEvents = await fetchCalendarEvents(hostAccessToken, timeMin, timeMax)
-    console.log('Host events count:', hostEvents.length)
+    console.log('🔍 Host events count:', hostEvents.length)
 
     let allEvents = [...hostEvents]
 
     // 게스트가 로그인한 경우 게스트 캘린더도 확인
     if (guestUserId) {
-      console.log('Fetching guest calendar events...')
-      const { data: guestTokens } = await supabaseAdmin
+      console.log('🔍 Fetching guest calendar events...')
+      console.log('🔍 Looking for guest tokens with user_id:', guestUserId)
+      
+      const { data: guestTokens, error: guestTokensError } = await supabaseAdmin
         .from('user_tokens')
         .select('*')
         .eq('user_id', guestUserId)
         .maybeSingle()
 
+      console.log('🔍 Guest tokens query error:', guestTokensError)
+      console.log('🔍 Guest tokens found:', !!guestTokens)
+
       if (guestTokens) {
+        console.log('🔍 Guest token expires at:', guestTokens.expires_at)
+        
         let guestAccessToken = guestTokens.access_token
         const guestExpiresAt = new Date(guestTokens.expires_at)
         
         if (guestExpiresAt < new Date()) {
+          console.log('🔍 Guest token expired, refreshing...')
           const newToken = await refreshAccessToken(guestTokens.refresh_token)
           if (newToken) {
+            console.log('🔍 Guest token refreshed successfully')
             guestAccessToken = newToken
             await supabaseAdmin
               .from('user_tokens')
@@ -273,17 +282,25 @@ export async function POST(request: Request) {
                 updated_at: new Date().toISOString(),
               })
               .eq('user_id', guestUserId)
+          } else {
+            console.log('🔍 Failed to refresh guest token')
           }
         }
 
         try {
           const guestEvents = await fetchCalendarEvents(guestAccessToken, timeMin, timeMax)
-          console.log('Guest events count:', guestEvents.length)
+          console.log('🔍 Guest events count:', guestEvents.length)
+          console.log('🔍 Sample guest events:', guestEvents.slice(0, 2))
           allEvents = [...hostEvents, ...guestEvents]
+          console.log('🔍 Total events (host + guest):', allEvents.length)
         } catch (error) {
-          console.error('Failed to fetch guest events:', error)
+          console.error('🔍 Failed to fetch guest events:', error)
         }
+      } else {
+        console.log('🔍 No guest tokens found in database for user:', guestUserId)
       }
+    } else {
+      console.log('🔍 No guest user ID provided')
     }
 
     // 사용 가능한 슬롯 계산
@@ -294,7 +311,7 @@ export async function POST(request: Request) {
       schedule.time_slot_duration
     )
 
-    console.log('Available slots count:', availableSlots.length)
+    console.log('🔍 Available slots count:', availableSlots.length)
 
     return NextResponse.json({ 
       success: true,
