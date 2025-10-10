@@ -1,8 +1,39 @@
 import { CalendarEvent, TimeSlot } from '@/types/calendar'
 
-// Google Calendar API로 일정 가져오기 (페이지네이션 포함)
-export async function fetchCalendarEvents(
+// 모든 캘린더 목록 가져오기
+async function fetchAllCalendars(accessToken: string): Promise<string[]> {
+  try {
+    const response = await fetch(
+      'https://www.googleapis.com/calendar/v3/users/me/calendarList',
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    )
+
+    if (!response.ok) {
+      console.error('Failed to fetch calendar list:', response.status)
+      return ['primary']
+    }
+
+    const data = await response.json()
+    const calendarIds = data.items
+      ?.filter((cal: any) => cal.selected !== false) // 선택된 캘린더만
+      ?.map((cal: any) => cal.id) || ['primary']
+
+    console.log('📋 Found calendars:', calendarIds.length)
+    return calendarIds
+  } catch (error) {
+    console.error('Error fetching calendar list:', error)
+    return ['primary']
+  }
+}
+
+// 특정 캘린더에서 이벤트 가져오기
+async function fetchEventsFromCalendar(
   accessToken: string,
+  calendarId: string,
   timeMin: string,
   timeMax: string
 ): Promise<CalendarEvent[]> {
@@ -11,14 +42,13 @@ export async function fetchCalendarEvents(
   let pageCount = 0
   const maxPages = 10
 
-  console.log('📅 Starting to fetch calendar events...')
-  console.log('📅 Time range:', { timeMin, timeMax })
+  console.log(`📅 Fetching events from calendar: ${calendarId}`)
 
   do {
     try {
       pageCount++
       
-      let url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+      let url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?` +
         `timeMin=${encodeURIComponent(timeMin)}&` +
         `timeMax=${encodeURIComponent(timeMax)}&` +
         `singleEvents=true&` +
@@ -29,27 +59,21 @@ export async function fetchCalendarEvents(
         url += `&pageToken=${encodeURIComponent(pageToken)}`
       }
 
-      console.log(`📄 Fetching page ${pageCount}...`)
-
       const response = await fetch(url, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       })
 
-      console.log(`📄 Page ${pageCount} response status:`, response.status)
-
       if (!response.ok) {
-        const errorData = await response.json()
-        console.error(`❌ Calendar API error:`, errorData)
-        throw new Error(`カレンダーの取得に失敗しました: ${response.status}`)
+        console.error(`❌ Failed to fetch from ${calendarId}:`, response.status)
+        break
       }
 
       const data = await response.json()
       const pageEvents = data.items || []
       
-      console.log(`📄 Page ${pageCount}: ${pageEvents.length} events`)
-      console.log(`📄 Has next page: ${!!data.nextPageToken}`)
+      console.log(`📄 Calendar ${calendarId} - Page ${pageCount}: ${pageEvents.length} events`)
       
       const formattedEvents = pageEvents.map((item: any) => ({
         id: item.id,
@@ -62,17 +86,53 @@ export async function fetchCalendarEvents(
       pageToken = data.nextPageToken
 
       if (pageCount >= maxPages) {
-        console.warn(`⚠️ Reached max pages (${maxPages}), stopping`)
+        console.warn(`⚠️ Reached max pages for ${calendarId}`)
         break
       }
     } catch (error) {
-      console.error(`❌ Error fetching page ${pageCount}:`, error)
-      throw error
+      console.error(`❌ Error fetching from ${calendarId}:`, error)
+      break
     }
   } while (pageToken)
 
-  console.log(`✅ Total events fetched: ${allEvents.length}`)
   return allEvents
+}
+
+// Google Calendar API로 모든 캘린더의 일정 가져오기
+export async function fetchCalendarEvents(
+  accessToken: string,
+  timeMin: string,
+  timeMax: string
+): Promise<CalendarEvent[]> {
+  console.log('📅 Starting to fetch calendar events from all calendars...')
+  console.log('📅 Time range:', { timeMin, timeMax })
+
+  try {
+    // 모든 캘린더 목록 가져오기
+    const calendarIds = await fetchAllCalendars(accessToken)
+    console.log(`📋 Total calendars to check: ${calendarIds.length}`)
+
+    // 각 캘린더에서 이벤트 가져오기
+    const allEventsPromises = calendarIds.map(calendarId =>
+      fetchEventsFromCalendar(accessToken, calendarId, timeMin, timeMax)
+    )
+
+    const allEventsArrays = await Promise.all(allEventsPromises)
+    const allEvents = allEventsArrays.flat()
+
+    // 중복 제거 (같은 이벤트가 여러 캘린더에 있을 수 있음)
+    const uniqueEvents = Array.from(
+      new Map(allEvents.map(event => [event.id, event])).values()
+    )
+
+    console.log(`✅ Total unique events fetched: ${uniqueEvents.length}`)
+    return uniqueEvents
+  } catch (error) {
+    console.error('❌ Error in fetchCalendarEvents:', error)
+    // 실패 시 primary만 조회
+    console.log('⚠️ Falling back to primary calendar only')
+    return fetchEventsFromCalendar(accessToken, 'primary', timeMin, timeMax)
+  }
 }
 
 // 빈 시간대 계산
@@ -92,7 +152,6 @@ export function calculateAvailableSlots(
 
   console.log('=== calculateAvailableSlots ===')
   console.log('Events:', events.length)
-  console.log('Events detail:', events)
 
   // 날짜별로 반복
   for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
@@ -108,15 +167,10 @@ export function calculateAvailableSlots(
       const eventDay = String(eventStart.getDate()).padStart(2, '0')
       const eventDateStr = `${eventYear}-${eventMonth}-${eventDay}`
       
-      console.log(`  Comparing: slot date ${dateStr} vs event date ${eventDateStr}`)
-      
       return eventDateStr === dateStr
     })
 
     console.log(`Date: ${dateStr}, Events: ${dayEvents.length}`)
-    dayEvents.forEach(event => {
-      console.log(`  Event: ${event.summary} - ${event.start} to ${event.end}`)
-    })
 
     // 근무 시간대를 슬롯으로 분할
     const slots = generateTimeSlots(
@@ -127,8 +181,6 @@ export function calculateAvailableSlots(
       lunchEnd,
       slotDuration
     )
-
-    console.log(`  Generated ${slots.length} slots for ${dateStr}`)
 
     // 이벤트와 겹치지 않는 슬롯만 추가
     slots.forEach(slot => {
@@ -145,10 +197,6 @@ export function calculateAvailableSlots(
           (slotStart <= eventStart && slotEnd >= eventEnd) ||
           (eventStart <= slotStart && eventEnd >= slotEnd)
         )
-
-        if (overlaps) {
-          console.log(`    Slot ${slot.startTime}-${slot.endTime} OVERLAPS with ${event.summary}`)
-        }
 
         return overlaps
       })
