@@ -18,6 +18,13 @@ export default function NewSchedulePage() {
     timeSlotDuration: 30,
   })
 
+  // ⭐ 게스트 사전 입력 관련 상태 추가
+  const [showGuestSection, setShowGuestSection] = useState(false)
+  const [guestPresets, setGuestPresets] = useState<Array<{
+    name: string
+    email: string
+  }>>([])
+
   useEffect(() => {
     checkUser()
   }, [])
@@ -33,6 +40,21 @@ export default function NewSchedulePage() {
     setUser(user)
   }
 
+  // ⭐ 게스트 추가/삭제/수정 함수
+  const addGuest = () => {
+    setGuestPresets([...guestPresets, { name: '', email: '' }])
+  }
+
+  const removeGuest = (index: number) => {
+    setGuestPresets(guestPresets.filter((_, i) => i !== index))
+  }
+
+  const updateGuest = (index: number, field: 'name' | 'email', value: string) => {
+    const updated = [...guestPresets]
+    updated[index][field] = value
+    setGuestPresets(updated)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -44,8 +66,8 @@ export default function NewSchedulePage() {
 
       const shareLink = uuidv4()
 
-      // 스케줄만 저장 (슬롯은 예약 페이지에서 실시간으로 생성)
-      const { error: scheduleError } = await supabase
+      // 스케줄 생성
+      const { data: scheduleData, error: scheduleError } = await supabase
         .from('schedules')
         .insert({
           user_id: user.id,
@@ -58,8 +80,35 @@ export default function NewSchedulePage() {
           is_one_time_link: false,
           is_used: false,
         })
+        .select()
+        .single()
 
       if (scheduleError) throw scheduleError
+
+      // ⭐ 게스트 정보가 있으면 저장
+      if (showGuestSection && guestPresets.length > 0) {
+        const validGuests = guestPresets.filter(g => g.name.trim() && g.email.trim())
+        
+        if (validGuests.length > 0) {
+          console.log('💾 Saving guest presets...')
+          
+          const response = await fetch('/api/guest-presets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              scheduleId: scheduleData.id,
+              guests: validGuests
+            })
+          })
+
+          if (response.ok) {
+            const result = await response.json()
+            console.log('✅ Guest presets saved:', result.guests.length)
+          } else {
+            console.log('⚠️ Failed to save guest presets')
+          }
+        }
+      }
 
       alert('スケジュールを作成しました！')
       router.push('/dashboard')
@@ -171,6 +220,66 @@ export default function NewSchedulePage() {
                 <option value={30}>30分</option>
                 <option value={60}>1時間</option>
               </select>
+            </div>
+
+            {/* ⭐ 게스트 사전 입력 섹션 추가 */}
+            <div className="border-t pt-6">
+              <div className="flex items-center justify-between mb-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showGuestSection}
+                    onChange={(e) => setShowGuestSection(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    ゲスト情報を事前登録（オプション）
+                  </span>
+                </label>
+              </div>
+
+              {showGuestSection && (
+                <div className="space-y-3 bg-gray-50 p-4 rounded-md">
+                  <p className="text-sm text-gray-600">
+                    ゲストの名前とメールアドレスを登録すると、パーソナライズドリンクが生成されます。<br />
+                    ゲストはリンクにアクセスするだけで情報が自動入力されます。
+                  </p>
+
+                  {guestPresets.map((guest, index) => (
+                    <div key={index} className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="名前"
+                        value={guest.name}
+                        onChange={(e) => updateGuest(index, 'name', e.target.value)}
+                        className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <input
+                        type="email"
+                        placeholder="メールアドレス"
+                        value={guest.email}
+                        onChange={(e) => updateGuest(index, 'email', e.target.value)}
+                        className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeGuest(index)}
+                        className="px-3 py-2 bg-red-100 text-red-600 rounded-md text-sm font-medium hover:bg-red-200"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={addGuest}
+                    className="w-full py-2 border-2 border-dashed border-gray-300 rounded-md text-sm text-gray-600 hover:bg-white hover:border-blue-400 hover:text-blue-600"
+                  >
+                    + ゲストを追加
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="bg-blue-50 p-4 rounded-md">

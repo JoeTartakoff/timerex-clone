@@ -19,10 +19,20 @@ interface Schedule {
   used_at: string | null
 }
 
+interface GuestPreset {
+  id: string
+  schedule_id: string
+  guest_name: string
+  guest_email: string
+  custom_token: string
+  created_at: string
+}
+
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [guestPresetsMap, setGuestPresetsMap] = useState<Record<string, GuestPreset[]>>({})
   const router = useRouter()
 
   useEffect(() => {
@@ -69,7 +79,7 @@ export default function DashboardPage() {
       .from('schedules')
       .select('*')
       .eq('user_id', userId)
-      .eq('is_one_time_link', false) // 원타임 전용 스케줄 제외
+      .eq('is_one_time_link', false)
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -78,6 +88,25 @@ export default function DashboardPage() {
     }
 
     setSchedules(data || [])
+
+    // ⭐ 각 스케줄의 게스트 프리셋 가져오기
+    if (data && data.length > 0) {
+      const presetsMap: Record<string, GuestPreset[]> = {}
+      
+      for (const schedule of data) {
+        const { data: presets } = await supabase
+          .from('guest_presets')
+          .select('*')
+          .eq('schedule_id', schedule.id)
+          .order('created_at', { ascending: true })
+        
+        if (presets && presets.length > 0) {
+          presetsMap[schedule.id] = presets
+        }
+      }
+      
+      setGuestPresetsMap(presetsMap)
+    }
   }
 
   const handleLogout = async () => {
@@ -86,7 +115,6 @@ export default function DashboardPage() {
   }
 
   const copyOneTimeLink = (shareLink: string) => {
-    // 고유한 토큰 생성
     const oneTimeToken = crypto.randomUUID()
     const url = `${window.location.origin}/book/${shareLink}?mode=onetime&token=${oneTimeToken}`
     navigator.clipboard.writeText(url)
@@ -97,6 +125,13 @@ export default function DashboardPage() {
     const url = `${window.location.origin}/book/${shareLink}`
     navigator.clipboard.writeText(url)
     alert('固定リンクをコピーしました！\n何度でも予約可能なリンクです。')
+  }
+
+  // ⭐ 개인화 링크 복사
+  const copyPersonalizedLink = (shareLink: string, guestToken: string, guestName: string) => {
+    const url = `${window.location.origin}/book/${shareLink}?guest=${guestToken}`
+    navigator.clipboard.writeText(url)
+    alert(`${guestName}様専用リンクをコピーしました！\n情報が自動入力されます。`)
   }
 
   const deleteSchedule = async (id: string) => {
@@ -197,6 +232,31 @@ export default function DashboardPage() {
                             ⏱️ {schedule.time_slot_duration}分枠
                           </span>
                         </div>
+
+                        {/* ⭐ 게스트 프리셋 표시 */}
+                        {guestPresetsMap[schedule.id] && guestPresetsMap[schedule.id].length > 0 && (
+                          <div className="mt-3 p-3 bg-green-50 rounded-md border border-green-200">
+                            <p className="text-sm font-medium text-green-800 mb-2">
+                              👥 登録済みゲスト ({guestPresetsMap[schedule.id].length}名)
+                            </p>
+                            <div className="space-y-2">
+                              {guestPresetsMap[schedule.id].map((guest) => (
+                                <div key={guest.id} className="flex items-center justify-between bg-white p-2 rounded border border-green-200">
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium text-gray-900">{guest.guest_name}</p>
+                                    <p className="text-xs text-gray-500">{guest.guest_email}</p>
+                                  </div>
+                                  <button
+                                    onClick={() => copyPersonalizedLink(schedule.share_link, guest.custom_token, guest.guest_name)}
+                                    className="ml-2 px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 whitespace-nowrap"
+                                  >
+                                    専用リンクコピー
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                       
                       <div className="ml-4 flex items-center gap-2">

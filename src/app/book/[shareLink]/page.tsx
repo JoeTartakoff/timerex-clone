@@ -50,8 +50,11 @@ export default function BookingPage() {
   const [isOneTimeMode, setIsOneTimeMode] = useState(false)
   const [oneTimeToken, setOneTimeToken] = useState<string | null>(null)
   const [tokenAlreadyUsed, setTokenAlreadyUsed] = useState(false)
+  
+  // ⭐ 게스트 프리셋 관련 상태 추가
+  const [isPrefilledGuest, setIsPrefilledGuest] = useState(false)
+  const [guestToken, setGuestToken] = useState<string | null>(null)
 
-  // ⭐ 초기화 플래그 (무한 루프 방지)
   const initRef = useRef(false)
   const guestLoginProcessedRef = useRef(false)
 
@@ -112,7 +115,6 @@ export default function BookingPage() {
       } catch (apiError) {
         console.log('⚠️ Calendar API failed, using static slots:', apiError)
         
-        // API 실패 시 availability_slots에서 가져오기
         const { data: slotsData, error: slotsError } = await supabase
           .from('availability_slots')
           .select('*')
@@ -136,24 +138,59 @@ export default function BookingPage() {
     }
   }
 
-  // ⭐ 초기 로드 (한 번만 실행)
+  // ⭐ 게스트 프리셋 로드
+  const fetchGuestPreset = async (token: string) => {
+    try {
+      console.log('🔍 Fetching guest preset for token:', token)
+      
+      const response = await fetch(`/api/guest-presets/${token}`)
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log('✅ Guest preset found:', data)
+        
+        setGuestInfo({
+          name: data.guestName,
+          email: data.guestEmail,
+        })
+        setIsPrefilledGuest(true)
+        
+        // 알림 표시
+        setTimeout(() => {
+          alert(`${data.guestName}様専用リンクです\n情報が自動入力されました`)
+        }, 500)
+      } else {
+        console.log('⚠️ Guest preset not found')
+      }
+    } catch (error) {
+      console.error('❌ Failed to fetch guest preset:', error)
+    }
+  }
+
+  // ⭐ 초기 로드
   useEffect(() => {
     if (initRef.current) return
     initRef.current = true
 
     console.log('🎬 Initial load')
 
-    // URL 파라미터 확인
     const urlParams = new URLSearchParams(window.location.search)
     const mode = urlParams.get('mode')
     const token = urlParams.get('token')
+    const guestParam = urlParams.get('guest') // ⭐ 게스트 토큰
+    
+    // ⭐ 게스트 프리셋 토큰 확인
+    if (guestParam) {
+      console.log('👤 Guest token detected:', guestParam)
+      setGuestToken(guestParam)
+      fetchGuestPreset(guestParam)
+    }
     
     if (mode === 'onetime' && token) {
       setIsOneTimeMode(true)
       setOneTimeToken(token)
       console.log('🔒 One-time mode activated:', token)
       
-      // 토큰이 이미 사용되었는지 확인
       const checkToken = async () => {
         const { data } = await supabase
           .from('bookings')
@@ -171,18 +208,20 @@ export default function BookingPage() {
 
     const init = async () => {
       try {
-        // 현재 로그인 상태 확인
         const { data: { user } } = await supabase.auth.getUser()
         
         if (user) {
           console.log('👤 User logged in:', user.email)
           setGuestUser(user as User)
-          setGuestInfo({
-            name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
-            email: user.email || '',
-          })
           
-          // 토큰 저장
+          // ⭐ 게스트 프리셋이 없을 때만 자동 입력
+          if (!guestParam) {
+            setGuestInfo({
+              name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+              email: user.email || '',
+            })
+          }
+          
           const { data: { session } } = await supabase.auth.getSession()
           if (session?.provider_token && session?.provider_refresh_token) {
             await supabase.from('user_tokens').upsert({
@@ -208,11 +247,9 @@ export default function BookingPage() {
     init()
   }, [shareLink])
 
-  // ⭐ 게스트 로그인 후 처리 (한 번만)
   useEffect(() => {
     if (!guestUser || guestLoginProcessedRef.current) return
     if (initRef.current && guestUser) {
-      // 초기 로드에서 이미 처리됨
       guestLoginProcessedRef.current = true
       return
     }
@@ -291,7 +328,6 @@ export default function BookingPage() {
     setSubmitting(true)
 
     try {
-      // ⭐ 원타임 모드인 경우 토큰 재확인
       if (isOneTimeMode && oneTimeToken) {
         console.log('🔍 Re-checking token...')
         
@@ -311,7 +347,6 @@ export default function BookingPage() {
         console.log('✅ Token available')
       }
 
-      // 예약 생성
       console.log('💾 Creating booking...')
       const { error: bookingError } = await supabase
         .from('bookings')
@@ -334,7 +369,6 @@ export default function BookingPage() {
 
       console.log('✅ Booking created')
 
-      // Google Calendar 추가
       try {
         console.log('📅 Adding to calendar...')
         const response = await fetch('/api/calendar/add-event', {
@@ -440,13 +474,19 @@ export default function BookingPage() {
               </div>
             </div>
             
-            {isOneTimeMode && (
-              <div className="ml-4">
+            <div className="ml-4 flex flex-col gap-2">
+              {isOneTimeMode && (
                 <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                   🔒 ワンタイムリンク
                 </span>
-              </div>
-            )}
+              )}
+              {/* ⭐ 게스트 프리셋 표시 */}
+              {isPrefilledGuest && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  ✅ 専用リンク
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="mt-6 pt-6 border-t border-gray-200">
@@ -572,6 +612,18 @@ export default function BookingPage() {
                     </div>
                   )}
 
+                  {/* ⭐ 게스트 프리셋 알림 */}
+                  {isPrefilledGuest && (
+                    <div className="bg-green-50 p-3 rounded-md border border-green-200">
+                      <p className="text-xs text-green-800 font-medium">
+                        ✅ 専用リンク
+                      </p>
+                      <p className="text-xs text-green-700 mt-1">
+                        情報が自動入力されています
+                      </p>
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       お名前 *
@@ -581,9 +633,9 @@ export default function BookingPage() {
                       required
                       value={guestInfo.name}
                       onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
-                      disabled={!!guestUser}
+                      disabled={!!guestUser || isPrefilledGuest}
                       className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 ${
-                        guestUser ? 'bg-gray-100' : ''
+                        (guestUser || isPrefilledGuest) ? 'bg-gray-100' : ''
                       }`}
                     />
                   </div>
@@ -597,9 +649,9 @@ export default function BookingPage() {
                       required
                       value={guestInfo.email}
                       onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
-                      disabled={!!guestUser}
+                      disabled={!!guestUser || isPrefilledGuest}
                       className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 ${
-                        guestUser ? 'bg-gray-100' : ''
+                        (guestUser || isPrefilledGuest) ? 'bg-gray-100' : ''
                       }`}
                     />
                   </div>
