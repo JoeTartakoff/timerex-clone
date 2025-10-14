@@ -32,7 +32,7 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
     console.log('🔄 Token refreshed successfully')
     return data.access_token || null
   } catch (error) {
-    console.error('🔄 Error refreshing token:', error)
+    console.error('Error refreshing token:', error)
     return null
   }
 }
@@ -42,7 +42,6 @@ async function addCalendarEvent(
   eventData: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
   console.log('📅 Adding calendar event...')
-  console.log('📅 Event data:', JSON.stringify(eventData, null, 2))
   
   const response = await fetch(
     'https://www.googleapis.com/calendar/v3/calendars/primary/events',
@@ -60,7 +59,7 @@ async function addCalendarEvent(
 
   if (!response.ok) {
     const errorData = await response.json()
-    console.error('❌ Calendar API error:', errorData)
+    console.error('Calendar API error:', errorData)
     throw new Error('Failed to create calendar event')
   }
 
@@ -74,9 +73,7 @@ export async function POST(request: Request) {
     const { scheduleId, bookingDate, startTime, endTime, guestName, guestEmail, guestUserId } = await request.json()
 
     console.log('=== ADD EVENT API ===')
-    console.log('📋 Schedule ID:', scheduleId)
-    console.log('👤 Guest User ID:', guestUserId)
-    console.log('📅 Booking:', { bookingDate, startTime, endTime })
+    console.log('Add event request:', { scheduleId, guestUserId })
 
     // 스케줄 정보와 호스트 정보 가져오기
     const { data: schedule, error: scheduleError } = await supabaseAdmin
@@ -100,7 +97,7 @@ export async function POST(request: Request) {
       .maybeSingle()
 
     if (hostTokensError || !hostTokens) {
-      console.error('❌ No tokens found for host')
+      console.error('No tokens found for host')
       return NextResponse.json({ success: false, error: 'No host tokens' }, { status: 400 })
     }
 
@@ -156,14 +153,14 @@ export async function POST(request: Request) {
     }
 
     // 호스트의 캘린더에 이벤트 추가
-    console.log('📅 Adding event to host calendar...')
+    console.log('Adding event to host calendar...')
     const hostEvent = await addCalendarEvent(hostAccessToken, eventData)
-    console.log('✅ Host event created:', (hostEvent as { id: string }).id)
+    console.log('Host event created:', (hostEvent as { id: string }).id)
 
     // 게스트가 로그인한 경우, 게스트의 캘린더에도 추가
     let guestEvent = null
     if (guestUserId) {
-      console.log('👤 Guest is logged in, adding to guest calendar...')
+      console.log('Guest is logged in, adding to guest calendar...')
       
       const { data: guestTokens } = await supabaseAdmin
         .from('user_tokens')
@@ -174,6 +171,7 @@ export async function POST(request: Request) {
       if (guestTokens) {
         console.log('✅ Guest tokens found')
         
+        // 게스트 access token 갱신
         let guestAccessToken = guestTokens.access_token
         const guestExpiresAt = new Date(guestTokens.expires_at)
         
@@ -193,6 +191,7 @@ export async function POST(request: Request) {
           }
         }
 
+        // 게스트용 이벤트 데이터 (설명 변경)
         const guestEventData = {
           ...eventData,
           summary: `${schedule.title}`,
@@ -204,20 +203,60 @@ export async function POST(request: Request) {
           guestEvent = await addCalendarEvent(guestAccessToken, guestEventData)
           console.log('✅ Guest event created:', (guestEvent as { id: string }).id)
         } catch (error) {
-          console.error('❌ Failed to add event to guest calendar:', error)
+          console.error('Failed to add event to guest calendar:', error)
+          // 게스트 캘린더 추가 실패해도 계속 진행
         }
       } else {
-        console.log('⚠️ No guest tokens found')
+        console.log('No tokens found for guest')
       }
     }
 
     console.log('=== ADD EVENT COMPLETED ===')
 
-    return NextResponse.json({ 
-      success: true,
-      hostEventId: (hostEvent as { id: string }).id,
-      guestEventId: guestEvent ? (guestEvent as { id: string }).id : null,
+const hostEventId = (hostEvent as { id: string }).id
+const guestEventId = guestEvent ? (guestEvent as { id: string }).id : null
+
+// ⭐ 먼저 해당 예약 찾기
+const { data: targetBooking } = await supabaseAdmin
+  .from('bookings')
+  .select('id')
+  .eq('schedule_id', scheduleId)
+  .eq('booking_date', bookingDate)
+  .eq('start_time', startTime)
+  .eq('end_time', endTime)
+  .eq('guest_email', guestEmail)
+  .order('created_at', { ascending: false })
+  .limit(1)
+  .single()
+
+console.log('🔍 Found booking to update:', targetBooking?.id)
+
+// ⭐ ID로 UPDATE
+if (targetBooking) {
+  const { error: updateError } = await supabaseAdmin
+    .from('bookings')
+    .update({
+      host_calendar_event_id: hostEventId,
+      guest_calendar_event_id: guestEventId,
     })
+    .eq('id', targetBooking.id)
+
+  if (updateError) {
+    console.error('❌ Failed to update booking:', updateError)
+  } else {
+    console.log('✅ Successfully updated booking with event IDs')
+  }
+} else {
+  console.error('❌ Booking not found for update')
+}
+
+return NextResponse.json({ 
+  success: true,
+  hostEventId,
+  guestEventId,
+  hostEventLink: (hostEvent as { htmlLink: string }).htmlLink,
+  guestEventLink: guestEvent ? (guestEvent as { htmlLink: string }).htmlLink : null
+})
   } catch (error: unknown) {
     console.error('=== ADD EVENT ERROR ===')
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'

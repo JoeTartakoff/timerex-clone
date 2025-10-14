@@ -251,7 +251,7 @@ export async function POST(request: Request) {
     console.log('📊 Fetching existing bookings...')
     const { data: bookings, error: bookingsError } = await supabaseAdmin
       .from('bookings')
-      .select('booking_date, start_time, end_time')
+      .select('booking_date, start_time, end_time, host_calendar_event_id')
       .eq('schedule_id', scheduleId)
       .eq('status', 'confirmed')
 
@@ -261,8 +261,70 @@ export async function POST(request: Request) {
       console.log(`📊 Found ${bookings?.length || 0} existing bookings`)
     }
 
+    // ⭐ 캘린더에서 이벤트 삭제 여부 확인
+    let validBookings: any[] = []
+    if (bookings && bookings.length > 0) {
+      console.log('🔍 Checking calendar events existence...')
+      
+      // 호스트 토큰 가져오기
+      const { data: hostTokens } = await supabaseAdmin
+        .from('user_tokens')
+        .select('access_token')
+        .eq('user_id', schedule.user_id)
+        .single()
+      
+console.log('🔑 Host tokens available:', !!hostTokens?.access_token)
+console.log('📋 Bookings to check:', bookings.length)
+
+if (hostTokens?.access_token) {
+  console.log('✅ Starting to check each booking...')
+  for (const booking of bookings) {
+    console.log('📝 Processing booking:', booking)
+          if (booking.host_calendar_event_id) {
+            try {
+// 캘린더 이벤트 존재 확인
+console.log('🔎 Checking event:', booking.host_calendar_event_id)
+const eventResponse = await fetch(
+  `https://www.googleapis.com/calendar/v3/calendars/primary/events/${booking.host_calendar_event_id}`,
+  {
+    headers: {
+      'Authorization': `Bearer ${hostTokens.access_token}`,
+    },
+  }
+)
+
+console.log('🔎 Event check response status:', eventResponse.status)
+
+const eventData = await eventResponse.json()
+console.log('🔎 Event data:', JSON.stringify(eventData, null, 2))
+
+// ⭐ 삭제된 이벤트는 status='cancelled'로 표시됨
+if (eventResponse.ok && eventData.status !== 'cancelled') {
+  // 이벤트가 존재하면 유효한 예약
+  console.log('✅ Event exists:', booking.host_calendar_event_id)
+  validBookings.push(booking)
+} else {
+  console.log('⚠️ Event deleted or cancelled (status ' + eventResponse.status + '):', booking.host_calendar_event_id)
+}            } catch (error) {
+              console.log('⚠️ Error checking event:', error)
+              // 에러 시 안전하게 예약으로 간주
+              validBookings.push(booking)
+            }
+          } else {
+            // event_id가 없으면 유효한 예약으로 간주
+            validBookings.push(booking)
+          }
+        }
+      } else {
+        // 토큰이 없으면 모든 예약을 유효한 것으로 간주
+        validBookings = [...bookings]
+      }
+    }
+
+    console.log(`✅ Valid bookings: ${validBookings.length} / ${bookings?.length || 0}`)
+
     const availableSlots = finalSlots.filter(slot => {
-      return !bookings?.some(
+      return !validBookings.some(
         booking =>
           booking.booking_date === slot.date &&
           booking.start_time === slot.startTime &&
@@ -282,6 +344,7 @@ export async function POST(request: Request) {
         hostSlotsCount: hostSlots.length,
         guestSlotsCount: guestUserId ? (finalSlots.length === hostSlots.length ? 0 : 'calculated') : 'not logged in',
         bookingsCount: bookings?.length || 0,
+        validBookingsCount: validBookings.length,
         finalSlotsCount: availableSlots.length,
       }
     })
