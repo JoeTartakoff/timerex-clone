@@ -31,9 +31,14 @@ interface GuestPreset {
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [schedules, setSchedules] = useState<Schedule[]>([])
-  const [guestPresetsMap, setGuestPresetsMap] = useState<Record<string, GuestPreset[]>>({})
-  const router = useRouter()
+const [schedules, setSchedules] = useState<Schedule[]>([])
+const [guestPresetsMap, setGuestPresetsMap] = useState<Record<string, GuestPreset[]>>({})
+// ⭐ 추가
+const [quickGuestInfo, setQuickGuestInfo] = useState({
+  name: '',
+  email: ''
+})
+const router = useRouter()
 
   useEffect(() => {
     checkUser()
@@ -114,18 +119,46 @@ export default function DashboardPage() {
     router.push('/login')
   }
 
-  const copyOneTimeLink = (shareLink: string) => {
-    const oneTimeToken = crypto.randomUUID()
-    const url = `${window.location.origin}/book/${shareLink}?mode=onetime&token=${oneTimeToken}`
-    navigator.clipboard.writeText(url)
+const copyOneTimeLink = (shareLink: string) => {
+  const oneTimeToken = crypto.randomUUID()
+  let url = `${window.location.origin}/book/${shareLink}`
+  
+  // ⭐ 게스트 정보가 있으면 경로에 추가
+  if (quickGuestInfo.name && quickGuestInfo.email) {
+    const encodedName = encodeURIComponent(quickGuestInfo.name)
+    const encodedEmail = encodeURIComponent(quickGuestInfo.email)
+    url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}?mode=onetime&token=${oneTimeToken}`
+  } else {
+    url = `${window.location.origin}/book/${shareLink}?mode=onetime&token=${oneTimeToken}`
+  }
+  
+  navigator.clipboard.writeText(url)
+  
+  if (quickGuestInfo.name && quickGuestInfo.email) {
+    alert(`${quickGuestInfo.name}様専用ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。`)
+  } else {
     alert('ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。')
   }
+}
 
-  const copyFixedLink = (shareLink: string) => {
-    const url = `${window.location.origin}/book/${shareLink}`
-    navigator.clipboard.writeText(url)
+const copyFixedLink = (shareLink: string) => {
+  let url = `${window.location.origin}/book/${shareLink}`
+  
+  // ⭐ 게스트 정보가 있으면 경로에 추가
+  if (quickGuestInfo.name && quickGuestInfo.email) {
+    const encodedName = encodeURIComponent(quickGuestInfo.name)
+    const encodedEmail = encodeURIComponent(quickGuestInfo.email)
+    url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}`
+  }
+  
+  navigator.clipboard.writeText(url)
+  
+  if (quickGuestInfo.name && quickGuestInfo.email) {
+    alert(`${quickGuestInfo.name}様専用リンクをコピーしました！\n何度でも予約可能なリンクです。`)
+  } else {
     alert('固定リンクをコピーしました！\n何度でも予約可能なリンクです。')
   }
+}
 
   // ⭐ 개인화 링크 복사
   const copyPersonalizedLink = (shareLink: string, guestToken: string, guestName: string) => {
@@ -194,6 +227,54 @@ export default function DashboardPage() {
               + 新しいスケジュール作成
             </Link>
           </div>
+    {/* ⭐⭐⭐ 여기에 추가 ⭐⭐⭐ */}
+    <div className="mb-6 bg-white shadow rounded-lg p-4">
+      <h3 className="text-sm font-medium text-gray-900 mb-3">
+        📝 クイックゲスト情報入力 (オプション)
+      </h3>
+      <p className="text-xs text-gray-500 mb-3">
+        ゲスト情報を入力してからリンクをコピーすると、専用リンクが生成されます
+      </p>
+      <div className="flex gap-3 items-end">
+        <div className="flex-1">
+          <label className="block text-xs font-medium text-gray-700 mb-1">
+            名前
+          </label>
+          <input
+            type="text"
+            value={quickGuestInfo.name}
+            onChange={(e) => setQuickGuestInfo({ ...quickGuestInfo, name: e.target.value })}
+            placeholder="例：田中太郎"
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="block text-xs font-medium text-gray-700 mb-1">
+            メールアドレス
+          </label>
+          <input
+            type="email"
+            value={quickGuestInfo.email}
+            onChange={(e) => setQuickGuestInfo({ ...quickGuestInfo, email: e.target.value })}
+            placeholder="例：tanaka@example.com"
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+          />
+        </div>
+        <button
+          onClick={() => setQuickGuestInfo({ name: '', email: '' })}
+          className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+        >
+          クリア
+        </button>
+      </div>
+      {quickGuestInfo.name && quickGuestInfo.email && (
+        <div className="mt-2 text-xs text-green-600">
+          ✅ {quickGuestInfo.name}様専用リンクが生成されます
+        </div>
+      )}
+    </div>
+    {/* ⭐⭐⭐ 여기까지 ⭐⭐⭐ */}
+
 
           <div className="bg-white shadow rounded-lg">
             <div className="px-6 py-4 border-b border-gray-200">
