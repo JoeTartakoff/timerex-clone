@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid'
 export default function NewSchedulePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
+  const [loadingSlots, setLoadingSlots] = useState(false)
   const [user, setUser] = useState<any>(null)
   
   const [formData, setFormData] = useState({
@@ -18,7 +19,18 @@ export default function NewSchedulePage() {
     timeSlotDuration: 30,
   })
 
-  // ⭐ 게스트 사전 입력 관련 상태 추가
+  const [isCandidateMode, setIsCandidateMode] = useState(false)
+  const [candidateSlots, setCandidateSlots] = useState<Array<{
+    date: string
+    startTime: string
+    endTime: string
+  }>>([])
+  const [availableTimeSlots, setAvailableTimeSlots] = useState<Array<{
+    date: string
+    startTime: string
+    endTime: string
+  }>>([])
+
   const [showGuestSection, setShowGuestSection] = useState(false)
   const [guestPresets, setGuestPresets] = useState<Array<{
     name: string
@@ -28,6 +40,13 @@ export default function NewSchedulePage() {
   useEffect(() => {
     checkUser()
   }, [])
+
+  // ⭐ 날짜 변경 시 호스트의 빈 시간 가져오기
+  useEffect(() => {
+    if (formData.dateRangeStart && formData.dateRangeEnd && isCandidateMode && user) {
+      fetchHostAvailableSlots()
+    }
+  }, [formData.dateRangeStart, formData.dateRangeEnd, formData.timeSlotDuration, isCandidateMode, user])
 
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -40,7 +59,89 @@ export default function NewSchedulePage() {
     setUser(user)
   }
 
-  // ⭐ 게스트 추가/삭제/수정 함수
+  // ⭐ 호스트의 빈 시간 가져오기
+  const fetchHostAvailableSlots = async () => {
+    if (!user) return
+
+    setLoadingSlots(true)
+    try {
+      console.log('📅 Fetching host available slots...')
+      
+      // 임시 스케줄 ID 생성 (API 호출용)
+      const tempScheduleId = uuidv4()
+      
+      // 임시 스케줄 생성
+      const { data: tempSchedule, error: tempError } = await supabase
+        .from('schedules')
+        .insert({
+          user_id: user.id,
+          title: 'TEMP_FOR_SLOT_CHECK',
+          share_link: tempScheduleId,
+          date_range_start: formData.dateRangeStart,
+          date_range_end: formData.dateRangeEnd,
+          time_slot_duration: formData.timeSlotDuration,
+          is_one_time_link: true,
+          is_used: true,
+        })
+        .select()
+        .single()
+
+      if (tempError) {
+        console.error('Failed to create temp schedule:', tempError)
+        alert('空き時間の取得に失敗しました')
+        return
+      }
+
+      // API 호출
+      const response = await fetch('/api/calendar/get-available-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scheduleId: tempSchedule.id,
+          guestUserId: null,
+        })
+      })
+
+      // 임시 스케줄 삭제
+      await supabase
+        .from('schedules')
+        .delete()
+        .eq('id', tempSchedule.id)
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch available slots')
+      }
+
+      const data = await response.json()
+      
+      if (data.success && data.slots) {
+        console.log(`✅ Fetched ${data.slots.length} available slots`)
+        setAvailableTimeSlots(data.slots)
+      } else {
+        alert('空き時間の取得に失敗しました')
+      }
+    } catch (error) {
+      console.error('Error fetching slots:', error)
+      alert('空き時間の取得に失敗しました')
+    } finally {
+      setLoadingSlots(false)
+    }
+  }
+
+  const toggleCandidateSlot = (slot: { date: string, startTime: string, endTime: string }) => {
+    const exists = candidateSlots.some(
+      s => s.date === slot.date && s.startTime === slot.startTime
+    )
+    
+    if (exists) {
+      setCandidateSlots(candidateSlots.filter(
+        s => !(s.date === slot.date && s.startTime === slot.startTime)
+      ))
+    } else {
+      setCandidateSlots([...candidateSlots, slot])
+    }
+  }
+
   const addGuest = () => {
     setGuestPresets([...guestPresets, { name: '', email: '' }])
   }
@@ -57,6 +158,12 @@ export default function NewSchedulePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    if (isCandidateMode && candidateSlots.length === 0) {
+      alert('候補時間を最低1つ選択してください')
+      return
+    }
+    
     setLoading(true)
 
     try {
@@ -66,7 +173,6 @@ export default function NewSchedulePage() {
 
       const shareLink = uuidv4()
 
-      // 스케줄 생성
       const { data: scheduleData, error: scheduleError } = await supabase
         .from('schedules')
         .insert({
@@ -79,19 +185,18 @@ export default function NewSchedulePage() {
           time_slot_duration: formData.timeSlotDuration,
           is_one_time_link: false,
           is_used: false,
+          is_candidate_mode: isCandidateMode,
+          candidate_slots: isCandidateMode ? candidateSlots : null,
         })
         .select()
         .single()
 
       if (scheduleError) throw scheduleError
 
-      // ⭐ 게스트 정보가 있으면 저장
       if (showGuestSection && guestPresets.length > 0) {
         const validGuests = guestPresets.filter(g => g.name.trim() && g.email.trim())
         
         if (validGuests.length > 0) {
-          console.log('💾 Saving guest presets...')
-          
           const response = await fetch('/api/guest-presets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -104,8 +209,6 @@ export default function NewSchedulePage() {
           if (response.ok) {
             const result = await response.json()
             console.log('✅ Guest presets saved:', result.guests.length)
-          } else {
-            console.log('⚠️ Failed to save guest presets')
           }
         }
       }
@@ -222,7 +325,90 @@ export default function NewSchedulePage() {
               </select>
             </div>
 
-            {/* ⭐ 게스트 사전 입력 섹션 추가 */}
+            {/* ⭐ 후보 시간 선택 모드 */}
+            <div className="border-t pt-6">
+              <div className="flex items-center justify-between mb-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isCandidateMode}
+                    onChange={(e) => setIsCandidateMode(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    候補時間モード（ゲストが複数候補から選択）
+                  </span>
+                </label>
+              </div>
+
+              {isCandidateMode && (
+                <div className="space-y-3 bg-purple-50 p-4 rounded-md border border-purple-200">
+                  <p className="text-sm text-purple-800">
+                    あなたのGoogleカレンダーと照合して、空いている時間のみ表示されます。<br />
+                    候補時間を選択してください。ゲストはこの中から希望時間を選んで返信できます。
+                  </p>
+
+                  {loadingSlots ? (
+                    <div className="text-center py-8">
+                      <p className="text-sm text-gray-600">カレンダーを確認中...</p>
+                    </div>
+                  ) : availableTimeSlots.length > 0 ? (
+                    <div className="space-y-4">
+                      {Object.entries(
+                        availableTimeSlots.reduce((acc, slot) => {
+                          if (!acc[slot.date]) acc[slot.date] = []
+                          acc[slot.date].push(slot)
+                          return acc
+                        }, {} as Record<string, typeof availableTimeSlots>)
+                      ).map(([date, slots]) => (
+                        <div key={date}>
+                          <h4 className="text-sm font-medium text-gray-700 mb-2">
+                            {new Date(date).toLocaleDateString('ja-JP', {
+                              month: 'long',
+                              day: 'numeric',
+                              weekday: 'short'
+                            })}
+                          </h4>
+                          <div className="grid grid-cols-4 gap-2">
+                            {slots.map((slot, idx) => {
+                              const isSelected = candidateSlots.some(
+                                s => s.date === slot.date && s.startTime === slot.startTime
+                              )
+                              return (
+<button
+  key={idx}
+  type="button"
+  onClick={() => toggleCandidateSlot(slot)}
+  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+    isSelected
+      ? 'bg-purple-600 text-white'
+      : 'bg-white border border-gray-300 text-gray-700 hover:bg-purple-50'
+  }`}
+>
+  {slot.startTime.slice(0, 5)}
+</button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">日付を選択すると空き時間が表示されます</p>
+                  )}
+
+                  {candidateSlots.length > 0 && (
+                    <div className="mt-3 p-3 bg-purple-100 rounded-md">
+                      <p className="text-sm font-medium text-purple-900">
+                        選択済み: {candidateSlots.length}個の候補時間
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 게스트 사전 입력 섹션 */}
             <div className="border-t pt-6">
               <div className="flex items-center justify-between mb-3">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -304,7 +490,7 @@ export default function NewSchedulePage() {
               </button>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || loadingSlots}
                 className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400"
               >
                 {loading ? '作成中...' : 'スケジュール作成'}
