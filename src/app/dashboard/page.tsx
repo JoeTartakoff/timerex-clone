@@ -17,12 +17,15 @@ interface Schedule {
   is_one_time_link: boolean
   is_used: boolean
   used_at: string | null
-  is_candidate_mode: boolean  // ⭐ 추가
-  candidate_slots: Array<{    // ⭐ 추가
+  is_candidate_mode: boolean
+  candidate_slots: Array<{
     date: string
     startTime: string
     endTime: string
   }> | null
+  is_interview_mode: boolean
+  interview_time_start: string | null
+  interview_time_end: string | null
 }
 
 interface GuestPreset {
@@ -120,13 +123,11 @@ export default function DashboardPage() {
 
     setSchedules(data || [])
 
-    // ⭐ 각 스케줄의 게스트 프리셋 가져오기
     if (data && data.length > 0) {
       const presetsMap: Record<string, GuestPreset[]> = {}
       const responsesMap: Record<string, GuestResponse[]> = {}
       
       for (const schedule of data) {
-        // 게스트 프리셋 가져오기
         const { data: presets } = await supabase
           .from('guest_presets')
           .select('*')
@@ -137,8 +138,8 @@ export default function DashboardPage() {
           presetsMap[schedule.id] = presets
         }
 
-        // ⭐ 후보 모드인 경우 게스트 응답 가져오기
-        if (schedule.is_candidate_mode) {
+        // ⭐ 후보 모드 또는 면접 모드인 경우 게스트 응답 가져오기
+        if (schedule.is_candidate_mode || schedule.is_interview_mode) {
           const { data: responses } = await supabase
             .from('guest_responses')
             .select('*')
@@ -165,7 +166,6 @@ export default function DashboardPage() {
     const oneTimeToken = crypto.randomUUID()
     let url = `${window.location.origin}/book/${shareLink}`
     
-    // ⭐ 게스트 정보가 있으면 경로에 추가
     if (quickGuestInfo.name && quickGuestInfo.email) {
       const encodedName = encodeURIComponent(quickGuestInfo.name)
       const encodedEmail = encodeURIComponent(quickGuestInfo.email)
@@ -183,56 +183,62 @@ export default function DashboardPage() {
     }
   }
 
-const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
-  let url
-  
-  // ⭐ 후보 모드면 /candidate/ 경로 사용
-  if (isCandidateMode) {
-    url = `${window.location.origin}/candidate/${shareLink}`
+  const copyFixedLink = (shareLink: string, isCandidateMode: boolean, isInterviewMode: boolean) => {
+    let url
     
-    // ⭐ 후보 모드에서도 게스트 정보가 있으면 쿼리 파라미터로 추가
-    if (quickGuestInfo.name && quickGuestInfo.email) {
-      const encodedName = encodeURIComponent(quickGuestInfo.name)
-      const encodedEmail = encodeURIComponent(quickGuestInfo.email)
-      url = `${window.location.origin}/candidate/${shareLink}?name=${encodedName}&email=${encodedEmail}`
+    if (isInterviewMode) {
+      url = `${window.location.origin}/interview/${shareLink}`
+      
+      if (quickGuestInfo.name && quickGuestInfo.email) {
+        const encodedName = encodeURIComponent(quickGuestInfo.name)
+        const encodedEmail = encodeURIComponent(quickGuestInfo.email)
+        url = `${window.location.origin}/interview/${shareLink}?name=${encodedName}&email=${encodedEmail}`
+      }
+    } else if (isCandidateMode) {
+      url = `${window.location.origin}/candidate/${shareLink}`
+      
+      if (quickGuestInfo.name && quickGuestInfo.email) {
+        const encodedName = encodeURIComponent(quickGuestInfo.name)
+        const encodedEmail = encodeURIComponent(quickGuestInfo.email)
+        url = `${window.location.origin}/candidate/${shareLink}?name=${encodedName}&email=${encodedEmail}`
+      }
+    } else {
+      url = `${window.location.origin}/book/${shareLink}`
+      
+      if (quickGuestInfo.name && quickGuestInfo.email) {
+        const encodedName = encodeURIComponent(quickGuestInfo.name)
+        const encodedEmail = encodeURIComponent(quickGuestInfo.email)
+        url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}`
+      }
     }
-  } else {
-    url = `${window.location.origin}/book/${shareLink}`
     
-    // 게스트 정보가 있으면 경로에 추가
-    if (quickGuestInfo.name && quickGuestInfo.email) {
-      const encodedName = encodeURIComponent(quickGuestInfo.name)
-      const encodedEmail = encodeURIComponent(quickGuestInfo.email)
-      url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}`
+    navigator.clipboard.writeText(url)
+    
+    if (isInterviewMode && quickGuestInfo.name && quickGuestInfo.email) {
+      alert(`${quickGuestInfo.name}様専用面接リンクをコピーしました！\nゲストが自由に候補時間を提案できます。`)
+    } else if (isInterviewMode) {
+      alert('面接モードのリンクをコピーしました！\nゲストが自由に候補時間を提案できます。')
+    } else if (isCandidateMode && quickGuestInfo.name && quickGuestInfo.email) {
+      alert(`${quickGuestInfo.name}様専用候補リンクをコピーしました！\nゲストは複数の候補から選択できます。`)
+    } else if (isCandidateMode) {
+      alert('候補時間モードのリンクをコピーしました！\nゲストは複数の候補から選択できます。')
+    } else if (quickGuestInfo.name && quickGuestInfo.email) {
+      alert(`${quickGuestInfo.name}様専用リンクをコピーしました！\n何度でも予約可能なリンクです。`)
+    } else {
+      alert('固定リンクをコピーしました！\n何度でも予約可能なリンクです。')
     }
   }
-  
-  navigator.clipboard.writeText(url)
-  
-  if (isCandidateMode && quickGuestInfo.name && quickGuestInfo.email) {
-    alert(`${quickGuestInfo.name}様専用候補リンクをコピーしました！\nゲストは複数の候補から選択できます。`)
-  } else if (isCandidateMode) {
-    alert('候補時間モードのリンクをコピーしました！\nゲストは複数の候補から選択できます。')
-  } else if (quickGuestInfo.name && quickGuestInfo.email) {
-    alert(`${quickGuestInfo.name}様専用リンクをコピーしました！\n何度でも予約可能なリンクです。`)
-  } else {
-    alert('固定リンクをコピーしました！\n何度でも予約可能なリンクです。')
-  }
-}
 
-  // ⭐ 개인화 링크 복사
   const copyPersonalizedLink = (shareLink: string, guestToken: string, guestName: string) => {
     const url = `${window.location.origin}/book/${shareLink}?guest=${guestToken}`
     navigator.clipboard.writeText(url)
     alert(`${guestName}様専用リンクをコピーしました！\n情報が自動入力されます。`)
   }
 
-  // ⭐ 게스트 응답 확정
   const confirmGuestResponse = async (responseId: string, slot: { date: string, startTime: string, endTime: string }, scheduleId: string) => {
     if (!confirm('この時間で確定しますか？\n両方のGoogleカレンダーに予定が追加されます。')) return
 
     try {
-      // 1. guest_responses 테이블 업데이트
       const { error: updateError } = await supabase
         .from('guest_responses')
         .update({
@@ -243,7 +249,6 @@ const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
 
       if (updateError) throw updateError
 
-      // 2. 캘린더 이벤트 추가 API 호출
       const response = await fetch('/api/calendar/add-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -261,7 +266,6 @@ const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
 
       alert('予定を確定しました！\n両方のカレンダーに追加されました。')
       
-      // 새로고침
       if (user) {
         await fetchSchedules(user.id)
       }
@@ -406,6 +410,11 @@ const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
                               📋 候補時間モード
                             </span>
                           )}
+                          {schedule.is_interview_mode && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              🎤 面接モード
+                            </span>
+                          )}
                         </div>
                         {schedule.description && (
                           <p className="text-sm text-gray-500 mb-2">
@@ -421,15 +430,15 @@ const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
                           </span>
                         </div>
 
-                        {/* ⭐ 게스트 응답 표시 (후보 모드) */}
-                        {schedule.is_candidate_mode && guestResponsesMap[schedule.id] && guestResponsesMap[schedule.id].length > 0 && (
-                          <div className="mt-3 p-3 bg-purple-50 rounded-md border border-purple-200">
-                            <p className="text-sm font-medium text-purple-800 mb-2">
+                        {/* ⭐ 게스트 응답 표시 (후보 모드 또는 면접 모드) */}
+                        {(schedule.is_candidate_mode || schedule.is_interview_mode) && guestResponsesMap[schedule.id] && guestResponsesMap[schedule.id].length > 0 && (
+                          <div className={`mt-3 p-3 rounded-md border ${schedule.is_interview_mode ? 'bg-blue-50 border-blue-200' : 'bg-purple-50 border-purple-200'}`}>
+                            <p className={`text-sm font-medium mb-2 ${schedule.is_interview_mode ? 'text-blue-800' : 'text-purple-800'}`}>
                               📬 ゲスト応答 ({guestResponsesMap[schedule.id].length}件)
                             </p>
                             <div className="space-y-2">
                               {guestResponsesMap[schedule.id].map((response) => (
-                                <div key={response.id} className="bg-white p-3 rounded border border-purple-200">
+                                <div key={response.id} className={`bg-white p-3 rounded border ${schedule.is_interview_mode ? 'border-blue-200' : 'border-purple-200'}`}>
                                   <div className="flex items-start justify-between mb-2">
                                     <div>
                                       <p className="text-sm font-medium text-gray-900">{response.guest_name}</p>
@@ -444,9 +453,9 @@ const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
                                   
                                   {response.is_confirmed && response.confirmed_slot ? (
                                     <div className="bg-green-50 p-2 rounded">
-<p className="text-xs text-green-800">
-  確定時間: {new Date(response.confirmed_slot.date).toLocaleDateString('ja-JP')} {response.confirmed_slot.startTime.slice(0, 5)} - {response.confirmed_slot.endTime.slice(0, 5)}
-</p>
+                                      <p className="text-xs text-green-800">
+                                        確定時間: {new Date(response.confirmed_slot.date).toLocaleDateString('ja-JP')} {response.confirmed_slot.startTime.slice(0, 5)} - {response.confirmed_slot.endTime.slice(0, 5)}
+                                      </p>
                                     </div>
                                   ) : (
                                     <div>
@@ -456,14 +465,14 @@ const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
                                           <button
                                             key={idx}
                                             onClick={() => confirmGuestResponse(response.id, slot, schedule.id)}
-                                            className="text-left p-2 bg-purple-50 hover:bg-purple-100 rounded border border-purple-200 text-xs"
+                                            className={`text-left p-2 rounded border text-xs ${schedule.is_interview_mode ? 'bg-blue-50 hover:bg-blue-100 border-blue-200' : 'bg-purple-50 hover:bg-purple-100 border-purple-200'}`}
                                           >
-                                            <div className="font-medium text-purple-900">
+                                            <div className={`font-medium ${schedule.is_interview_mode ? 'text-blue-900' : 'text-purple-900'}`}>
                                               {new Date(slot.date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
                                             </div>
-<div className="text-purple-700">
-  {slot.startTime.slice(0, 5)} - {slot.endTime.slice(0, 5)}
-</div>
+                                            <div className={schedule.is_interview_mode ? 'text-blue-700' : 'text-purple-700'}>
+                                              {slot.startTime.slice(0, 5)} - {slot.endTime.slice(0, 5)}
+                                            </div>
                                           </button>
                                         ))}
                                       </div>
@@ -502,7 +511,7 @@ const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
                       </div>
                       
                       <div className="ml-4 flex items-center gap-2">
-                        {!schedule.is_candidate_mode && (
+                        {!schedule.is_candidate_mode && !schedule.is_interview_mode && (
                           <button
                             onClick={() => copyOneTimeLink(schedule.share_link)}
                             className="px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
@@ -511,14 +520,16 @@ const copyFixedLink = (shareLink: string, isCandidateMode: boolean) => {
                           </button>
                         )}
                         <button
-                          onClick={() => copyFixedLink(schedule.share_link, schedule.is_candidate_mode)}
+                          onClick={() => copyFixedLink(schedule.share_link, schedule.is_candidate_mode, schedule.is_interview_mode)}
                           className={`px-3 py-2 border rounded-md text-sm font-medium whitespace-nowrap ${
-                            schedule.is_candidate_mode
+                            schedule.is_interview_mode
+                              ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                              : schedule.is_candidate_mode
                               ? 'border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100'
                               : 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
                           }`}
                         >
-                          {schedule.is_candidate_mode ? '候補リンクコピー' : '固定リンクコピー'}
+                          {schedule.is_interview_mode ? '面接リンクコピー' : schedule.is_candidate_mode ? '候補リンクコピー' : '固定リンクコピー'}
                         </button>
                         <button
                           onClick={() => deleteSchedule(schedule.id)}

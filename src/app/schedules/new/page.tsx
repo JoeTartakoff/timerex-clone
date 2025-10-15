@@ -19,6 +19,15 @@ export default function NewSchedulePage() {
     timeSlotDuration: 30,
   })
 
+  const [isInterviewMode, setIsInterviewMode] = useState(false)
+  const [interviewTimeSettings, setInterviewTimeSettings] = useState({
+    startTime: '09:00',
+    endTime: '18:00',
+    breakStart: '12:00',
+    breakEnd: '13:00',
+  })
+  const [hasBreakTime, setHasBreakTime] = useState(true)
+
   const [isCandidateMode, setIsCandidateMode] = useState(false)
   const [candidateSlots, setCandidateSlots] = useState<Array<{
     date: string
@@ -41,7 +50,6 @@ export default function NewSchedulePage() {
     checkUser()
   }, [])
 
-  // ⭐ 날짜 변경 시 호스트의 빈 시간 가져오기
   useEffect(() => {
     if (formData.dateRangeStart && formData.dateRangeEnd && isCandidateMode && user) {
       fetchHostAvailableSlots()
@@ -59,18 +67,13 @@ export default function NewSchedulePage() {
     setUser(user)
   }
 
-  // ⭐ 호스트의 빈 시간 가져오기
   const fetchHostAvailableSlots = async () => {
     if (!user) return
 
     setLoadingSlots(true)
     try {
-      console.log('📅 Fetching host available slots...')
-      
-      // 임시 스케줄 ID 생성 (API 호출용)
       const tempScheduleId = uuidv4()
       
-      // 임시 스케줄 생성
       const { data: tempSchedule, error: tempError } = await supabase
         .from('schedules')
         .insert({
@@ -92,7 +95,6 @@ export default function NewSchedulePage() {
         return
       }
 
-      // API 호출
       const response = await fetch('/api/calendar/get-available-slots', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -102,7 +104,6 @@ export default function NewSchedulePage() {
         })
       })
 
-      // 임시 스케줄 삭제
       await supabase
         .from('schedules')
         .delete()
@@ -115,7 +116,6 @@ export default function NewSchedulePage() {
       const data = await response.json()
       
       if (data.success && data.slots) {
-        console.log(`✅ Fetched ${data.slots.length} available slots`)
         setAvailableTimeSlots(data.slots)
       } else {
         alert('空き時間の取得に失敗しました')
@@ -187,6 +187,11 @@ export default function NewSchedulePage() {
           is_used: false,
           is_candidate_mode: isCandidateMode,
           candidate_slots: isCandidateMode ? candidateSlots : null,
+          is_interview_mode: isInterviewMode,
+          interview_time_start: isInterviewMode ? interviewTimeSettings.startTime : null,
+          interview_time_end: isInterviewMode ? interviewTimeSettings.endTime : null,
+          interview_break_start: isInterviewMode && hasBreakTime ? interviewTimeSettings.breakStart : null,
+          interview_break_end: isInterviewMode && hasBreakTime ? interviewTimeSettings.breakEnd : null,
         })
         .select()
         .single()
@@ -325,14 +330,19 @@ export default function NewSchedulePage() {
               </select>
             </div>
 
-            {/* ⭐ 후보 시간 선택 모드 */}
+            {/* 후보 시간 선택 모드 */}
             <div className="border-t pt-6">
               <div className="flex items-center justify-between mb-3">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isCandidateMode}
-                    onChange={(e) => setIsCandidateMode(e.target.checked)}
+                    onChange={(e) => {
+                      setIsCandidateMode(e.target.checked)
+                      if (e.target.checked) {
+                        setIsInterviewMode(false)
+                      }
+                    }}
                     className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                   />
                   <span className="text-sm font-medium text-gray-700">
@@ -375,18 +385,18 @@ export default function NewSchedulePage() {
                                 s => s.date === slot.date && s.startTime === slot.startTime
                               )
                               return (
-<button
-  key={idx}
-  type="button"
-  onClick={() => toggleCandidateSlot(slot)}
-  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-    isSelected
-      ? 'bg-purple-600 text-white'
-      : 'bg-white border border-gray-300 text-gray-700 hover:bg-purple-50'
-  }`}
->
-  {slot.startTime.slice(0, 5)}
-</button>
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => toggleCandidateSlot(slot)}
+                                  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                                    isSelected
+                                      ? 'bg-purple-600 text-white'
+                                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-purple-50'
+                                  }`}
+                                >
+                                  {slot.startTime.slice(0, 5)}
+                                </button>
                               )
                             })}
                           </div>
@@ -404,6 +414,112 @@ export default function NewSchedulePage() {
                       </p>
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+
+            {/* 면접 모드 */}
+            <div className="border-t pt-6">
+              <div className="flex items-center justify-between mb-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isInterviewMode}
+                    onChange={(e) => {
+                      setIsInterviewMode(e.target.checked)
+                      if (e.target.checked) {
+                        setIsCandidateMode(false)
+                      }
+                    }}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    面接モード（ゲストが自由に候補時間を提案）
+                  </span>
+                </label>
+              </div>
+
+              {isInterviewMode && (
+                <div className="space-y-3 bg-blue-50 p-4 rounded-md border border-blue-200">
+                  <p className="text-sm text-blue-800">
+                    営業時間を設定してください。ゲストはこの時間範囲内で自由に候補時間を提案できます。<br />
+                    ホストのカレンダー情報はゲストに表示されません。
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        営業開始時間
+                      </label>
+                      <input
+                        type="time"
+                        value={interviewTimeSettings.startTime}
+                        onChange={(e) => setInterviewTimeSettings({ ...interviewTimeSettings, startTime: e.target.value })}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        営業終了時間
+                      </label>
+                      <input
+                        type="time"
+                        value={interviewTimeSettings.endTime}
+                        onChange={(e) => setInterviewTimeSettings({ ...interviewTimeSettings, endTime: e.target.value })}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 휴게시간 옵션 */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="hasBreakTime"
+                      checked={hasBreakTime}
+                      onChange={(e) => setHasBreakTime(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="hasBreakTime" className="text-sm font-medium text-gray-700 cursor-pointer">
+                      休憩時間を設定する
+                    </label>
+                  </div>
+
+                  {hasBreakTime && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          休憩開始時間
+                        </label>
+                        <input
+                          type="time"
+                          value={interviewTimeSettings.breakStart}
+                          onChange={(e) => setInterviewTimeSettings({ ...interviewTimeSettings, breakStart: e.target.value })}
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          休憩終了時間
+                        </label>
+                        <input
+                          type="time"
+                          value={interviewTimeSettings.breakEnd}
+                          onChange={(e) => setInterviewTimeSettings({ ...interviewTimeSettings, breakEnd: e.target.value })}
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-3 p-3 bg-blue-100 rounded-md">
+                    <p className="text-sm font-medium text-blue-900">
+                      設定時間: {interviewTimeSettings.startTime} - {interviewTimeSettings.endTime}
+                      {hasBreakTime && ` （休憩: ${interviewTimeSettings.breakStart} - ${interviewTimeSettings.breakEnd}）`}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
