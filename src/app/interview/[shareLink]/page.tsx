@@ -85,10 +85,13 @@ export default function InterviewPage() {
     const start = new Date(schedule.date_range_start)
     const end = new Date(schedule.date_range_end)
     
-    const [startHour, startMin] = schedule.interview_time_start.split(':').map(Number)
-    const [endHour, endMin] = schedule.interview_time_end.split(':').map(Number)
-    const [breakStartHour, breakStartMin] = schedule.interview_break_start.split(':').map(Number)
-    const [breakEndHour, breakEndMin] = schedule.interview_break_end.split(':').map(Number)
+const [startHour, startMin] = schedule.interview_time_start.split(':').map(Number)
+const [endHour, endMin] = schedule.interview_time_end.split(':').map(Number)
+
+// ⭐ 휴게시간이 null일 수 있음
+const hasBreak = schedule.interview_break_start && schedule.interview_break_end
+const [breakStartHour, breakStartMin] = hasBreak ? schedule.interview_break_start.split(':').map(Number) : [0, 0]
+const [breakEndHour, breakEndMin] = hasBreak ? schedule.interview_break_end.split(':').map(Number) : [0, 0]
     
     for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
       const dateStr = date.toISOString().split('T')[0]
@@ -98,12 +101,14 @@ export default function InterviewPage() {
           if (hour === startHour && min < startMin) continue
           if (hour === endHour && min >= endMin) continue
           
-          // 점심시간 체크
-          const currentTime = hour * 60 + min
-          const breakStart = breakStartHour * 60 + breakStartMin
-          const breakEnd = breakEndHour * 60 + breakEndMin
-          
-          if (currentTime >= breakStart && currentTime < breakEnd) continue
+// 점심시간 체크 (휴게시간이 있을 때만)
+if (hasBreak) {
+  const currentTime = hour * 60 + min
+  const breakStart = breakStartHour * 60 + breakStartMin
+  const breakEnd = breakEndHour * 60 + breakEndMin
+  
+  if (currentTime >= breakStart && currentTime < breakEnd) continue
+}
           
           const slotStartTime = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
           const endMinutes = min + schedule.time_slot_duration
@@ -258,10 +263,15 @@ export default function InterviewPage() {
               <h2 className="text-lg font-medium text-gray-900 mb-4">
                 希望する時間を選択（複数選択可）
               </h2>
-              <p className="text-sm text-gray-600 mb-4">
-                営業時間: {schedule.interview_time_start} - {schedule.interview_time_end}<br />
-                休憩時間: {schedule.interview_break_start} - {schedule.interview_break_end}
-              </p>
+<p className="text-sm text-gray-600 mb-4">
+  営業時間: {schedule.interview_time_start} - {schedule.interview_time_end}
+  {schedule.interview_break_start && schedule.interview_break_end && (
+    <>
+      <br />
+      休憩時間: {schedule.interview_break_start} - {schedule.interview_break_end}
+    </>
+  )}
+</p>
 
               <div className="space-y-6">
                 {Object.entries(slotsByDate).map(([date, slots]) => (
