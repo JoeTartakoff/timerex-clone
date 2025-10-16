@@ -5,6 +5,15 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
+interface Folder {
+  id: string
+  user_id: string
+  name: string
+  color: string
+  created_at: string
+  updated_at: string
+}
+
 interface Schedule {
   id: string
   title: string
@@ -26,6 +35,7 @@ interface Schedule {
   is_interview_mode: boolean
   interview_time_start: string | null
   interview_time_end: string | null
+  folder_id: string | null
 }
 
 interface GuestPreset {
@@ -58,6 +68,7 @@ interface GuestResponse {
 }
 
 export default function DashboardPage() {
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [schedules, setSchedules] = useState<Schedule[]>([])
@@ -67,7 +78,11 @@ export default function DashboardPage() {
     name: '',
     email: ''
   })
-  const router = useRouter()
+  const [folders, setFolders] = useState<Folder[]>([])
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
+  const [showFolderModal, setShowFolderModal] = useState(false)
+  const [folderName, setFolderName] = useState('')
+  const [editingFolder, setEditingFolder] = useState<Folder | null>(null)
 
   useEffect(() => {
     checkUser()
@@ -109,53 +124,95 @@ export default function DashboardPage() {
   }
 
   const fetchSchedules = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('schedules')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_one_time_link', false)
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching schedules:', error)
-      return
-    }
-
-    setSchedules(data || [])
-
-    if (data && data.length > 0) {
-      const presetsMap: Record<string, GuestPreset[]> = {}
-      const responsesMap: Record<string, GuestResponse[]> = {}
+    try {
+      console.log('🔍 fetchSchedules 시작, userId:', userId)
       
-      for (const schedule of data) {
-        const { data: presets } = await supabase
-          .from('guest_presets')
-          .select('*')
-          .eq('schedule_id', schedule.id)
-          .order('created_at', { ascending: true })
-        
-        if (presets && presets.length > 0) {
-          presetsMap[schedule.id] = presets
-        }
+      const { data: foldersData } = await supabase
+        .from('folders')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true })
+      
+      setFolders(foldersData || [])
 
-        // ⭐ 후보 모드 또는 면접 모드인 경우 게스트 응답 가져오기
-        if (schedule.is_candidate_mode || schedule.is_interview_mode) {
-          const { data: responses } = await supabase
-            .from('guest_responses')
+      // 개인 스케줄 가져오기
+      console.log('📅 개인 스케줄 조회 시작...')
+      const { data: personalSchedules, error: personalError } = await supabase
+        .from('schedules')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_one_time_link', false)
+        .order('created_at', { ascending: false })
+
+      console.log('📊 결과:', { personalSchedules, personalError })
+
+      if (personalError) {
+        console.error('❌ Error fetching personal schedules:', personalError)
+        setSchedules([])
+        return
+      }
+
+      // 내가 속한 팀의 스케줄 가져오기
+      const { data: myTeams } = await supabase
+        .from('team_members')
+        .select('team_id')
+        .eq('user_id', userId)
+
+      let teamSchedules: any[] = []
+      if (myTeams && myTeams.length > 0) {
+        const teamIds = myTeams.map(t => t.team_id)
+        const { data: teamSchedulesData } = await supabase
+          .from('schedules')
+          .select('*')
+          .in('team_id', teamIds)
+          .eq('is_one_time_link', false)
+          .order('created_at', { ascending: false })
+        
+        teamSchedules = teamSchedulesData || []
+      }
+
+      // 개인 스케줄 + 팀 스케줄 합치기
+      const allSchedules = [...(personalSchedules || []), ...teamSchedules]
+      setSchedules(allSchedules)
+
+      // 게스트 정보 가져오기
+      if (allSchedules && allSchedules.length > 0) {
+        const presetsMap: Record<string, GuestPreset[]> = {}
+        const responsesMap: Record<string, GuestResponse[]> = {}
+        
+        for (const schedule of allSchedules) {
+          const { data: presets } = await supabase
+            .from('guest_presets')
             .select('*')
             .eq('schedule_id', schedule.id)
-            .order('created_at', { ascending: false })
+            .order('created_at', { ascending: true })
           
-          if (responses && responses.length > 0) {
-            responsesMap[schedule.id] = responses
+          if (presets && presets.length > 0) {
+            presetsMap[schedule.id] = presets
+          }
+
+          if (schedule.is_candidate_mode || schedule.is_interview_mode) {
+            const { data: responses } = await supabase
+              .from('guest_responses')
+              .select('*')
+              .eq('schedule_id', schedule.id)
+              .order('created_at', { ascending: false })
+            
+            if (responses && responses.length > 0) {
+              responsesMap[schedule.id] = responses
+            }
           }
         }
+        
+        setGuestPresetsMap(presetsMap)
+        setGuestResponsesMap(responsesMap)
       }
-      
-      setGuestPresetsMap(presetsMap)
-      setGuestResponsesMap(responsesMap)
+    } catch (error) {
+      console.error('Error in fetchSchedules:', error)
+      setSchedules([])
     }
   }
+
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -294,6 +351,118 @@ export default function DashboardPage() {
     }
   }
 
+  const createFolder = async () => {
+    if (!folderName.trim()) {
+      alert('フォルダ名を入力してください')
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('folders')
+        .insert({
+          user_id: user.id,
+          name: folderName,
+          color: '#3B82F6',
+        })
+
+      if (error) throw error
+
+      alert('フォルダを作成しました')
+      setFolderName('')
+      setShowFolderModal(false)
+      
+      if (user) {
+        await fetchSchedules(user.id)
+      }
+    } catch (error) {
+      console.error('Error creating folder:', error)
+      alert('フォルダの作成に失敗しました')
+    }
+  }
+
+  const updateFolder = async () => {
+    if (!editingFolder || !folderName.trim()) return
+
+    try {
+      const { error } = await supabase
+        .from('folders')
+        .update({ name: folderName, updated_at: new Date().toISOString() })
+        .eq('id', editingFolder.id)
+
+      if (error) throw error
+
+      alert('フォルダ名を変更しました')
+      setFolderName('')
+      setEditingFolder(null)
+      setShowFolderModal(false)
+      
+      if (user) {
+        await fetchSchedules(user.id)
+      }
+    } catch (error) {
+      console.error('Error updating folder:', error)
+      alert('フォルダ名の変更に失敗しました')
+    }
+  }
+
+  const deleteFolder = async (folderId: string) => {
+    if (!confirm('このフォルダを削除しますか？\nフォルダ内のスケジュールは未分類に移動されます。')) return
+
+    try {
+      const { error } = await supabase
+        .from('folders')
+        .delete()
+        .eq('id', folderId)
+
+      if (error) throw error
+
+      alert('フォルダを削除しました')
+      
+      if (user) {
+        await fetchSchedules(user.id)
+      }
+    } catch (error) {
+      console.error('Error deleting folder:', error)
+      alert('フォルダの削除に失敗しました')
+    }
+  }
+
+  const moveScheduleToFolder = async (scheduleId: string, folderId: string | null) => {
+    try {
+      const { error } = await supabase
+        .from('schedules')
+        .update({ folder_id: folderId })
+        .eq('id', scheduleId)
+
+      if (error) throw error
+
+      if (user) {
+        await fetchSchedules(user.id)
+      }
+    } catch (error) {
+      console.error('Error moving schedule:', error)
+      alert('スケジュールの移動に失敗しました')
+    }
+  }
+
+  const openFolderModal = (folder?: Folder) => {
+    if (folder) {
+      setEditingFolder(folder)
+      setFolderName(folder.name)
+    } else {
+      setEditingFolder(null)
+      setFolderName('')
+    }
+    setShowFolderModal(true)
+  }
+
+  const closeFolderModal = () => {
+    setShowFolderModal(false)
+    setFolderName('')
+    setEditingFolder(null)
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -302,15 +471,35 @@ export default function DashboardPage() {
     )
   }
 
+  const filteredSchedules = selectedFolder
+    ? schedules.filter(s => s.folder_id === selectedFolder)
+    : selectedFolder === 'uncategorized'
+    ? schedules.filter(s => !s.folder_id)
+    : schedules
+
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
-            <div className="flex items-center">
+            <div className="flex items-center space-x-8">
               <h1 className="text-xl font-bold text-gray-900">
-                スケジュール管理
+                Timerex
               </h1>
+              <div className="flex space-x-4">
+                <Link
+                  href="/dashboard"
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  📅 スケジュール
+                </Link>
+                <Link
+                  href="/teams"
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  👥 チーム管理
+                </Link>
+              </div>
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-700">{user?.email}</span>
@@ -334,6 +523,73 @@ export default function DashboardPage() {
             >
               + 新しいスケジュール作成
             </Link>
+          </div>
+
+          <div className="mb-6 bg-white shadow rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-gray-900">
+                📁 フォルダ
+              </h3>
+              <button
+                onClick={() => openFolderModal()}
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+              >
+                + 新規作成
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <button
+                onClick={() => setSelectedFolder(null)}
+                className={`w-full text-left px-3 py-2 rounded-md text-sm ${
+                  selectedFolder === null
+                    ? 'bg-blue-50 text-blue-700 font-medium'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                📋 すべて ({schedules.length})
+              </button>
+
+              <button
+                onClick={() => setSelectedFolder('uncategorized')}
+                className={`w-full text-left px-3 py-2 rounded-md text-sm ${
+                  selectedFolder === 'uncategorized'
+                    ? 'bg-blue-50 text-blue-700 font-medium'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                📂 未分類 ({schedules.filter(s => !s.folder_id).length})
+              </button>
+
+              {folders.map((folder) => (
+                <div key={folder.id} className="flex items-center gap-2">
+                  <button
+                    onClick={() => setSelectedFolder(folder.id)}
+                    className={`flex-1 text-left px-3 py-2 rounded-md text-sm ${
+                      selectedFolder === folder.id
+                        ? 'bg-blue-50 text-blue-700 font-medium'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    📁 {folder.name} ({schedules.filter(s => s.folder_id === folder.id).length})
+                  </button>
+                  <button
+                    onClick={() => openFolderModal(folder)}
+                    className="p-2 text-gray-400 hover:text-gray-600"
+                    title="編集"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    onClick={() => deleteFolder(folder.id)}
+                    className="p-2 text-gray-400 hover:text-red-600"
+                    title="削除"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="mb-6 bg-white shadow rounded-lg p-4">
@@ -389,15 +645,15 @@ export default function DashboardPage() {
               </h2>
             </div>
 
-            {schedules.length === 0 ? (
+            {filteredSchedules.length === 0 ? (
               <div className="px-6 py-8 text-center">
                 <p className="text-gray-500">
-                  まだスケジュールがありません。新しいスケジュールを作成してください。
+                  {selectedFolder ? 'このフォルダにスケジュールがありません。' : 'まだスケジュールがありません。新しいスケジュールを作成してください。'}
                 </p>
               </div>
             ) : (
               <div className="divide-y divide-gray-200">
-                {schedules.map((schedule) => (
+                {filteredSchedules.map((schedule) => (
                   <div key={schedule.id} className="px-6 py-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -430,7 +686,21 @@ export default function DashboardPage() {
                           </span>
                         </div>
 
-                        {/* ⭐ 게스트 응답 표시 (후보 모드 또는 면접 모드) */}
+                        <div className="mt-2">
+                          <select
+                            value={schedule.folder_id || ''}
+                            onChange={(e) => moveScheduleToFolder(schedule.id, e.target.value || null)}
+                            className="text-xs border border-gray-300 rounded px-2 py-1"
+                          >
+                            <option value="">📂 未分類</option>
+                            {folders.map((folder) => (
+                              <option key={folder.id} value={folder.id}>
+                                📁 {folder.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
                         {(schedule.is_candidate_mode || schedule.is_interview_mode) && guestResponsesMap[schedule.id] && guestResponsesMap[schedule.id].length > 0 && (
                           <div className={`mt-3 p-3 rounded-md border ${schedule.is_interview_mode ? 'bg-blue-50 border-blue-200' : 'bg-purple-50 border-purple-200'}`}>
                             <p className={`text-sm font-medium mb-2 ${schedule.is_interview_mode ? 'text-blue-800' : 'text-purple-800'}`}>
@@ -484,7 +754,6 @@ export default function DashboardPage() {
                           </div>
                         )}
 
-                        {/* ⭐ 게스트 프리셋 표시 */}
                         {guestPresetsMap[schedule.id] && guestPresetsMap[schedule.id].length > 0 && (
                           <div className="mt-3 p-3 bg-green-50 rounded-md border border-green-200">
                             <p className="text-sm font-medium text-green-800 mb-2">
@@ -546,6 +815,46 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
+
+      {showFolderModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">
+              {editingFolder ? 'フォルダ名を編集' : '新しいフォルダを作成'}
+            </h3>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                フォルダ名
+              </label>
+              <input
+                type="text"
+                value={folderName}
+                onChange={(e) => setFolderName(e.target.value)}
+                placeholder="例：営業チーム"
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={closeFolderModal}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={editingFolder ? updateFolder : createFolder}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium"
+              >
+                {editingFolder ? '保存' : '作成'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

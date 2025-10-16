@@ -5,6 +5,12 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 
+interface Team {
+  id: string
+  name: string
+  description: string | null
+}
+
 export default function NewSchedulePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -18,6 +24,11 @@ export default function NewSchedulePage() {
     dateRangeEnd: '',
     timeSlotDuration: 30,
   })
+
+  // 팀 관련 상태
+  const [isTeamSchedule, setIsTeamSchedule] = useState(false)
+  const [teams, setTeams] = useState<Team[]>([])
+  const [selectedTeamId, setSelectedTeamId] = useState<string>('')
 
   const [isInterviewMode, setIsInterviewMode] = useState(false)
   const [interviewTimeSettings, setInterviewTimeSettings] = useState({
@@ -65,7 +76,57 @@ export default function NewSchedulePage() {
     }
 
     setUser(user)
+    await fetchTeams(user.id)
   }
+
+const fetchTeams = async (userId: string) => {
+  console.log('🔍 fetchTeams for schedules/new')
+  console.log('👤 userId:', userId)
+
+  // 1. 내가 Owner인 팀
+  const { data: ownedTeams, error: ownedError } = await supabase
+    .from('teams')
+    .select('id, name, description')
+    .eq('owner_id', userId)
+    .order('created_at', { ascending: false })
+
+  console.log('✅ Owner 팀:', ownedTeams?.length || 0)
+  if (ownedError) console.error('❌ Owner 팀 조회 에러:', ownedError)
+
+  // 2. 내가 Member인 팀 (user_id로 조회)
+  const { data: memberTeams, error: memberError } = await supabase
+    .from('team_members')
+    .select('team_id')
+    .eq('user_id', userId)
+
+  console.log('✅ Member 팀:', memberTeams?.length || 0)
+  if (memberError) console.error('❌ Member 팀 조회 에러:', memberError)
+
+  if (memberTeams && memberTeams.length > 0) {
+    const memberTeamIds = memberTeams.map(m => m.team_id)
+    console.log('📋 Member 팀 IDs:', memberTeamIds)
+    
+    const { data: memberTeamsData, error: teamsError } = await supabase
+      .from('teams')
+      .select('id, name, description')
+      .in('id', memberTeamIds)
+      .order('created_at', { ascending: false })
+
+    console.log('✅ Member 팀 데이터:', memberTeamsData?.length || 0)
+    if (teamsError) console.error('❌ Member 팀 데이터 조회 에러:', teamsError)
+
+    // 3. 합치기 (중복 제거)
+    const allTeams = [...(ownedTeams || []), ...(memberTeamsData || [])]
+    const uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values())
+    
+    console.log('✅ 최종 팀 수:', uniqueTeams.length)
+    console.log('📊 팀 목록:', uniqueTeams.map(t => t.name))
+    setTeams(uniqueTeams)
+  } else {
+    console.log('ℹ️ Member 팀 없음, Owner 팀만 표시')
+    setTeams(ownedTeams || [])
+  }
+}
 
   const fetchHostAvailableSlots = async () => {
     if (!user) return
@@ -163,6 +224,11 @@ export default function NewSchedulePage() {
       alert('候補時間を最低1つ選択してください')
       return
     }
+
+    if (isTeamSchedule && !selectedTeamId) {
+      alert('チームを選択してください')
+      return
+    }
     
     setLoading(true)
 
@@ -176,7 +242,8 @@ export default function NewSchedulePage() {
       const { data: scheduleData, error: scheduleError } = await supabase
         .from('schedules')
         .insert({
-          user_id: user.id,
+          user_id: isTeamSchedule ? null : user.id,  // 팀 스케줄이면 NULL
+          team_id: isTeamSchedule ? selectedTeamId : null,  // 팀 ID 추가
           title: formData.title,
           description: formData.description,
           share_link: shareLink,
@@ -192,6 +259,7 @@ export default function NewSchedulePage() {
           interview_time_end: isInterviewMode ? interviewTimeSettings.endTime : null,
           interview_break_start: isInterviewMode && hasBreakTime ? interviewTimeSettings.breakStart : null,
           interview_break_end: isInterviewMode && hasBreakTime ? interviewTimeSettings.breakEnd : null,
+          assignment_method: isTeamSchedule ? 'round_robin' : null,
         })
         .select()
         .single()
@@ -218,7 +286,7 @@ export default function NewSchedulePage() {
         }
       }
 
-      alert('スケジュールを作成しました！')
+      alert(isTeamSchedule ? 'チームスケジュールを作成しました！' : 'スケジュールを作成しました！')
       router.push('/dashboard')
     } catch (error: any) {
       console.error('Error:', error)
@@ -288,6 +356,82 @@ export default function NewSchedulePage() {
               />
             </div>
 
+            {/* ⭐ 팀 선택 섹션 추가 */}
+            <div className="border-t pt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                担当 *
+              </label>
+              <div className="space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={!isTeamSchedule}
+                    onChange={() => {
+                      setIsTeamSchedule(false)
+                      setSelectedTeamId('')
+                    }}
+                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">
+                    👤 個人（自分だけ）
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={isTeamSchedule}
+                    onChange={() => setIsTeamSchedule(true)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">
+                    👥 チーム（複数人で対応）
+                  </span>
+                </label>
+
+                {isTeamSchedule && (
+                  <div className="ml-6 mt-2">
+{teams.length === 0 ? (
+  <div className="text-sm text-gray-500 bg-yellow-50 p-3 rounded-md border border-yellow-200">
+    所属しているチームがありません。<br />
+    チームスケジュールを作成するには、まず
+    <button
+      type="button"
+      onClick={() => router.push('/teams')}
+      className="text-blue-600 hover:text-blue-700 font-medium mx-1"
+    >
+      チーム管理
+    </button>
+    でチームを作成するか、既存のチームに参加してください。
+  </div>
+) : (
+  <select
+    value={selectedTeamId}
+    onChange={(e) => setSelectedTeamId(e.target.value)}
+    required={isTeamSchedule}
+    className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+  >
+    <option value="">チームを選択してください</option>
+    {teams.map((team) => (
+      <option key={team.id} value={team.id}>
+        {team.name}
+      </option>
+    ))}
+  </select>
+)}                
+                  </div>
+                )}
+              </div>
+
+              {isTeamSchedule && selectedTeamId && (
+                <div className="mt-3 p-3 bg-blue-50 rounded-md border border-blue-200">
+                  <p className="text-sm text-blue-800">
+                    ℹ️ チームスケジュールは Round Robin 方式で自動的にメンバーに割り当てられます
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">
@@ -327,6 +471,16 @@ export default function NewSchedulePage() {
               >
                 <option value={30}>30分</option>
                 <option value={60}>1時間</option>
+                <option value={90}>1時間30分</option>
+                <option value={120}>2時間</option>
+                <option value={150}>2時間30分</option>
+                <option value={180}>3時間</option>
+                <option value={210}>3時間30分</option>
+                <option value={240}>4時間</option>
+                <option value={270}>4時間30分</option>
+                <option value={300}>5時間</option>
+                <option value={330}>5時間30分</option>
+                <option value={360}>6時間</option>
               </select>
             </div>
 
@@ -472,7 +626,6 @@ export default function NewSchedulePage() {
                     </div>
                   </div>
 
-                  {/* 휴게시간 옵션 */}
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -606,7 +759,7 @@ export default function NewSchedulePage() {
               </button>
               <button
                 type="submit"
-                disabled={loading || loadingSlots}
+                disabled={loading || loadingSlots || (isTeamSchedule && !selectedTeamId)}
                 className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400"
               >
                 {loading ? '作成中...' : 'スケジュール作成'}
