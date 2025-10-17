@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -13,11 +13,16 @@ interface Team {
 
 type ScheduleMode = 'normal' | 'candidate' | 'interview'
 
-export default function NewSchedulePage() {
+export default function EditSchedulePage() {
   const router = useRouter()
-  const [loading, setLoading] = useState(false)
+  const params = useParams()
+  const scheduleId = params.id as string
+
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [loadingSlots, setLoadingSlots] = useState(false)
   const [user, setUser] = useState<any>(null)
+  const [hasBookings, setHasBookings] = useState(false)
   
   const [formData, setFormData] = useState({
     title: '',
@@ -52,12 +57,6 @@ export default function NewSchedulePage() {
     endTime: string
   }>>([])
 
-  const [showGuestSection, setShowGuestSection] = useState(false)
-  const [guestPresets, setGuestPresets] = useState<Array<{
-    name: string
-    email: string
-  }>>([])
-
   useEffect(() => {
     checkUser()
   }, [])
@@ -78,51 +77,122 @@ export default function NewSchedulePage() {
 
     setUser(user)
     await fetchTeams(user.id)
+    await loadSchedule(user.id)
   }
 
   const fetchTeams = async (userId: string) => {
-    console.log('🔍 fetchTeams for schedules/new')
-    console.log('👤 userId:', userId)
-
-    const { data: ownedTeams, error: ownedError } = await supabase
+    const { data: ownedTeams } = await supabase
       .from('teams')
       .select('id, name, description')
       .eq('owner_id', userId)
       .order('created_at', { ascending: false })
 
-    console.log('✅ Owner 팀:', ownedTeams?.length || 0)
-    if (ownedError) console.error('❌ Owner 팀 조회 에러:', ownedError)
-
-    const { data: memberTeams, error: memberError } = await supabase
+    const { data: memberTeams } = await supabase
       .from('team_members')
       .select('team_id')
       .eq('user_id', userId)
 
-    console.log('✅ Member 팀:', memberTeams?.length || 0)
-    if (memberError) console.error('❌ Member 팀 조회 에러:', memberError)
-
     if (memberTeams && memberTeams.length > 0) {
       const memberTeamIds = memberTeams.map(m => m.team_id)
-      console.log('📋 Member 팀 IDs:', memberTeamIds)
       
-      const { data: memberTeamsData, error: teamsError } = await supabase
+      const { data: memberTeamsData } = await supabase
         .from('teams')
         .select('id, name, description')
         .in('id', memberTeamIds)
         .order('created_at', { ascending: false })
 
-      console.log('✅ Member 팀 데이터:', memberTeamsData?.length || 0)
-      if (teamsError) console.error('❌ Member 팀 데이터 조회 에러:', teamsError)
-
       const allTeams = [...(ownedTeams || []), ...(memberTeamsData || [])]
       const uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values())
       
-      console.log('✅ 최종 팀 수:', uniqueTeams.length)
-      console.log('📊 팀 목록:', uniqueTeams.map(t => t.name))
       setTeams(uniqueTeams)
     } else {
-      console.log('ℹ️ Member 팀 없음, Owner 팀만 표시')
       setTeams(ownedTeams || [])
+    }
+  }
+
+  const loadSchedule = async (userId: string) => {
+    try {
+      const { data: schedule, error } = await supabase
+        .from('schedules')
+        .select('*')
+        .eq('id', scheduleId)
+        .single()
+
+      if (error) throw error
+
+      if (!schedule) {
+        alert('スケジュールが見つかりません')
+        router.push('/dashboard')
+        return
+      }
+
+      // 권한 확인
+      if (schedule.user_id && schedule.user_id !== userId) {
+        alert('このスケジュールを編集する権限がありません')
+        router.push('/dashboard')
+        return
+      }
+
+      if (schedule.team_id) {
+        const { data: membership } = await supabase
+          .from('team_members')
+          .select('id')
+          .eq('team_id', schedule.team_id)
+          .eq('user_id', userId)
+          .single()
+
+        if (!membership) {
+          alert('このスケジュールを編集する権限がありません')
+          router.push('/dashboard')
+          return
+        }
+      }
+
+      // 예약 확인
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('schedule_id', scheduleId)
+        .limit(1)
+
+      setHasBookings((bookings && bookings.length > 0) || false)
+
+      // 데이터 로드
+      setFormData({
+        title: schedule.title,
+        description: schedule.description || '',
+        dateRangeStart: schedule.date_range_start,
+        dateRangeEnd: schedule.date_range_end,
+        timeSlotDuration: schedule.time_slot_duration,
+      })
+
+      setIsTeamSchedule(!!schedule.team_id)
+      setSelectedTeamId(schedule.team_id || '')
+
+      if (schedule.is_interview_mode) {
+        setScheduleMode('interview')
+        setInterviewTimeSettings({
+          startTime: schedule.interview_time_start || '09:00',
+          endTime: schedule.interview_time_end || '18:00',
+          breakStart: schedule.interview_break_start || '12:00',
+          breakEnd: schedule.interview_break_end || '13:00',
+        })
+        setHasBreakTime(!!(schedule.interview_break_start && schedule.interview_break_end))
+      } else if (schedule.is_candidate_mode) {
+        setScheduleMode('candidate')
+        // 기존 후보 시간 로드
+        if (schedule.candidate_slots) {
+          setCandidateSlots(schedule.candidate_slots)
+        }
+      } else {
+        setScheduleMode('normal')
+      }
+
+      setLoading(false)
+    } catch (error) {
+      console.error('Error loading schedule:', error)
+      alert('スケジュールの読み込みに失敗しました')
+      router.push('/dashboard')
     }
   }
 
@@ -201,20 +271,6 @@ export default function NewSchedulePage() {
     }
   }
 
-  const addGuest = () => {
-    setGuestPresets([...guestPresets, { name: '', email: '' }])
-  }
-
-  const removeGuest = (index: number) => {
-    setGuestPresets(guestPresets.filter((_, i) => i !== index))
-  }
-
-  const updateGuest = (index: number, field: 'name' | 'email', value: string) => {
-    const updated = [...guestPresets]
-    updated[index][field] = value
-    setGuestPresets(updated)
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
@@ -223,78 +279,72 @@ export default function NewSchedulePage() {
       return
     }
 
-    if (isTeamSchedule && !selectedTeamId) {
-      alert('チームを選択してください')
-      return
+    if (hasBookings) {
+      if (!confirm('既に予約が入っています。\n変更すると予約に影響する可能性があります。\n続けますか？')) {
+        return
+      }
     }
     
-    setLoading(true)
+    setSaving(true)
 
     try {
-      if (!user) {
-        throw new Error('ログインが必要です')
+      const updateData: any = {
+        title: formData.title,
+        description: formData.description,
+        time_slot_duration: formData.timeSlotDuration,
       }
 
-      const shareLink = uuidv4()
+      // 예약이 없으면 날짜도 변경 가능
+      if (!hasBookings) {
+        updateData.date_range_start = formData.dateRangeStart
+        updateData.date_range_end = formData.dateRangeEnd
+      }
 
-      const { data: scheduleData, error: scheduleError } = await supabase
+      // 면접 모드 설정
+      if (scheduleMode === 'interview') {
+        updateData.is_interview_mode = true
+        updateData.is_candidate_mode = false
+        updateData.interview_time_start = interviewTimeSettings.startTime
+        updateData.interview_time_end = interviewTimeSettings.endTime
+        updateData.interview_break_start = hasBreakTime ? interviewTimeSettings.breakStart : null
+        updateData.interview_break_end = hasBreakTime ? interviewTimeSettings.breakEnd : null
+        updateData.candidate_slots = null
+      } else if (scheduleMode === 'candidate') {
+        updateData.is_candidate_mode = true
+        updateData.is_interview_mode = false
+        updateData.interview_time_start = null
+        updateData.interview_time_end = null
+        updateData.interview_break_start = null
+        updateData.interview_break_end = null
+        updateData.candidate_slots = candidateSlots
+      } else {
+        updateData.is_candidate_mode = false
+        updateData.is_interview_mode = false
+        updateData.interview_time_start = null
+        updateData.interview_time_end = null
+        updateData.interview_break_start = null
+        updateData.interview_break_end = null
+        updateData.candidate_slots = null
+      }
+
+      const { error } = await supabase
         .from('schedules')
-        .insert({
-          user_id: isTeamSchedule ? null : user.id,
-          team_id: isTeamSchedule ? selectedTeamId : null,
-          title: formData.title,
-          description: formData.description,
-          share_link: shareLink,
-          date_range_start: formData.dateRangeStart,
-          date_range_end: formData.dateRangeEnd,
-          time_slot_duration: formData.timeSlotDuration,
-          is_one_time_link: false,
-          is_used: false,
-          is_candidate_mode: scheduleMode === 'candidate',
-          candidate_slots: scheduleMode === 'candidate' ? candidateSlots : null,
-          is_interview_mode: scheduleMode === 'interview',
-          interview_time_start: scheduleMode === 'interview' ? interviewTimeSettings.startTime : null,
-          interview_time_end: scheduleMode === 'interview' ? interviewTimeSettings.endTime : null,
-          interview_break_start: scheduleMode === 'interview' && hasBreakTime ? interviewTimeSettings.breakStart : null,
-          interview_break_end: scheduleMode === 'interview' && hasBreakTime ? interviewTimeSettings.breakEnd : null,
-          assignment_method: isTeamSchedule ? 'round_robin' : null,
-        })
-        .select()
-        .single()
+        .update(updateData)
+        .eq('id', scheduleId)
 
-      if (scheduleError) throw scheduleError
+      if (error) throw error
 
-      if (showGuestSection && guestPresets.length > 0) {
-        const validGuests = guestPresets.filter(g => g.name.trim() && g.email.trim())
-        
-        if (validGuests.length > 0) {
-          const response = await fetch('/api/guest-presets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              scheduleId: scheduleData.id,
-              guests: validGuests
-            })
-          })
-
-          if (response.ok) {
-            const result = await response.json()
-            console.log('✅ Guest presets saved:', result.guests.length)
-          }
-        }
-      }
-
-      alert(isTeamSchedule ? 'チーム予約カレンダーを作成しました！' : '予約カレンダーを作成しました！')
+      alert('スケジュールを更新しました！')
       router.push('/dashboard')
     } catch (error: any) {
       console.error('Error:', error)
-      alert(error.message || 'スケジュールの作成に失敗しました')
+      alert(error.message || 'スケジュールの更新に失敗しました')
     } finally {
-      setLoading(false)
+      setSaving(false)
     }
   }
 
-  if (!user) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <p className="text-gray-600">読み込み中...</p>
@@ -309,7 +359,7 @@ export default function NewSchedulePage() {
           <div className="flex justify-between h-16">
             <div className="flex items-center">
               <h1 className="text-xl font-bold text-gray-900">
-                新しい予約カレンダー作成
+                予約カレンダー編集
               </h1>
             </div>
             <div className="flex items-center">
@@ -326,66 +376,62 @@ export default function NewSchedulePage() {
 
       <main className="max-w-3xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="bg-white shadow rounded-lg p-6">
+          {hasBookings && (
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+              <p className="text-sm text-yellow-800">
+                ⚠️ このスケジュールには既に予約が入っています。<br />
+                日付範囲の変更はできません。タイトル、説明、予約枠の長さのみ変更可能です。
+              </p>
+            </div>
+          )}
 
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* 예약 모드 표시 (변경 불가) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                予約モード (変更不可)
+              </label>
+              <div className="grid grid-cols-3 gap-3">
+                <div className={`px-4 py-3 rounded-lg border-2 text-sm font-medium text-center ${
+                  scheduleMode === 'normal'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 bg-gray-100 text-gray-400'
+                }`}>
+                  📅 通常予約
+                </div>
+                <div className={`px-4 py-3 rounded-lg border-2 text-sm font-medium text-center ${
+                  scheduleMode === 'candidate'
+                    ? 'border-purple-500 bg-purple-50 text-purple-700'
+                    : 'border-gray-200 bg-gray-100 text-gray-400'
+                }`}>
+                  📋 候補日を提示
+                </div>
+                <div className={`px-4 py-3 rounded-lg border-2 text-sm font-medium text-center ${
+                  scheduleMode === 'interview'
+                    ? 'border-green-500 bg-green-50 text-green-700'
+                    : 'border-gray-200 bg-gray-100 text-gray-400'
+                }`}>
+                  🎤 候補日を受取
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-gray-500">
+                予約モードは作成後に変更できません
+              </p>
+            </div>
 
-<form onSubmit={handleSubmit} className="space-y-6">
-  <div>
-    <label className="block text-sm font-medium text-gray-700 mb-3">
-      予約モード *
-    </label>
-    <div className="grid grid-cols-3 gap-3">
-      <button
-        type="button"
-        onClick={() => setScheduleMode('normal')}
-        className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
-          scheduleMode === 'normal'
-            ? 'border-blue-500 bg-blue-50 text-blue-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-        }`}
-      >
-        📅 通常予約
-      </button>
-      <button
-        type="button"
-        onClick={() => setScheduleMode('candidate')}
-        className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
-          scheduleMode === 'candidate'
-            ? 'border-purple-500 bg-purple-50 text-purple-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-        }`}
-      >
-        📋 候補日を提示
-      </button>
-      <button
-        type="button"
-        onClick={() => setScheduleMode('interview')}
-        className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
-          scheduleMode === 'interview'
-            ? 'border-green-500 bg-green-50 text-green-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-        }`}
-      >
-        🎤 候補日を受取
-      </button>
-    </div>
-  </div>
-
-  {/* 그 다음 스케줄 타이틀 */}
-  <div>
-    <label className="block text-sm font-medium text-gray-700">
-      スケジュールタイトル *
-    </label>
-    <input
-      type="text"
-      required
-      value={formData.title}
-      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-      placeholder="例：打ち合わせ予約"
-    />
-  </div>
-
-  {/* 나머지 필드들은 그대로... */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                スケジュールタイトル *
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                placeholder="例：打ち合わせ予約"
+              />
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700">
@@ -400,80 +446,22 @@ export default function NewSchedulePage() {
               />
             </div>
 
-            <div className="border-t pt-6">
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                担当 *
-              </label>
-              <div className="space-y-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={!isTeamSchedule}
-                    onChange={() => {
-                      setIsTeamSchedule(false)
-                      setSelectedTeamId('')
-                    }}
-                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-700">
-                    👤 個人（自分だけ）
-                  </span>
+            {/* 팀 스케줄 표시 (변경 불가) */}
+            {isTeamSchedule && (
+              <div className="border-t pt-6">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  担当 (変更不可)
                 </label>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={isTeamSchedule}
-                    onChange={() => setIsTeamSchedule(true)}
-                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-700">
-                    👥 チーム（複数人で対応）
-                  </span>
-                </label>
-
-                {isTeamSchedule && (
-                  <div className="ml-6 mt-2">
-                    {teams.length === 0 ? (
-                      <div className="text-sm text-gray-500 bg-yellow-50 p-3 rounded-md border border-yellow-200">
-                        所属しているチームがありません。<br />
-                        チームスケジュールを作成するには、まず
-                        <button
-                          type="button"
-                          onClick={() => router.push('/teams')}
-                          className="text-blue-600 hover:text-blue-700 font-medium mx-1"
-                        >
-                          チーム管理
-                        </button>
-                        でチームを作成するか、既存のチームに参加してください。
-                      </div>
-                    ) : (
-                      <select
-                        value={selectedTeamId}
-                        onChange={(e) => setSelectedTeamId(e.target.value)}
-                        required={isTeamSchedule}
-                        className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="">チームを選択してください</option>
-                        {teams.map((team) => (
-                          <option key={team.id} value={team.id}>
-                            {team.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {isTeamSchedule && selectedTeamId && (
-                <div className="mt-3 p-3 bg-blue-50 rounded-md border border-blue-200">
-                  <p className="text-sm text-blue-800">
-                    ℹ️ チームスケジュールは Round Robin 方式で自動的にメンバーに割り当てられます
+                <div className="p-3 bg-gray-50 rounded-md border border-gray-200">
+                  <p className="text-sm text-gray-700">
+                    👥 チームスケジュール
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    個人/チームの設定は作成後に変更できません
                   </p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -485,7 +473,10 @@ export default function NewSchedulePage() {
                   required
                   value={formData.dateRangeStart}
                   onChange={(e) => setFormData({ ...formData, dateRangeStart: e.target.value })}
-                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  disabled={hasBookings}
+                  className={`mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+                    hasBookings ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
                 />
               </div>
 
@@ -498,7 +489,10 @@ export default function NewSchedulePage() {
                   required
                   value={formData.dateRangeEnd}
                   onChange={(e) => setFormData({ ...formData, dateRangeEnd: e.target.value })}
-                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  disabled={hasBookings}
+                  className={`mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+                    hasBookings ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
                 />
               </div>
             </div>
@@ -594,12 +588,11 @@ export default function NewSchedulePage() {
               </div>
             )}
 
-            {/* 候補日を受取 モード */}
+            {/* 候補日を受取 モード 설정 */}
             {scheduleMode === 'interview' && (
               <div className="space-y-3 bg-green-50 p-4 rounded-md border border-green-200">
                 <p className="text-sm text-green-800">
-                  営業時間を設定してください。ゲストはこの時間範囲内で自由に候補時間を提案できます。<br />
-                  ホストのカレンダー情報はゲストに表示されません。
+                  営業時間を設定してください。
                 </p>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -668,87 +661,8 @@ export default function NewSchedulePage() {
                     </div>
                   </div>
                 )}
-
-                <div className="mt-3 p-3 bg-green-100 rounded-md">
-                  <p className="text-sm font-medium text-green-900">
-                    設定時間: {interviewTimeSettings.startTime} - {interviewTimeSettings.endTime}
-                    {hasBreakTime && ` （休憩: ${interviewTimeSettings.breakStart} - ${interviewTimeSettings.breakEnd}）`}
-                  </p>
-                </div>
               </div>
             )}
-
-            {/* 게스트 사전 입력 섹션 */}
-            <div className="border-t pt-6">
-              <div className="flex items-center justify-between mb-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showGuestSection}
-                    onChange={(e) => setShowGuestSection(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">
-                    ゲスト情報を事前登録（オプション）
-                  </span>
-                </label>
-              </div>
-
-              {showGuestSection && (
-                <div className="space-y-3 bg-gray-50 p-4 rounded-md">
-                  <p className="text-sm text-gray-600">
-                    ゲストの名前とメールアドレスを登録すると、パーソナライズドリンクが生成されます。<br />
-                    ゲストはリンクにアクセスするだけで情報が自動入力されます。
-                  </p>
-
-                  {guestPresets.map((guest, index) => (
-                    <div key={index} className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="名前"
-                        value={guest.name}
-                        onChange={(e) => updateGuest(index, 'name', e.target.value)}
-                        className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      />
-                      <input
-                        type="email"
-                        placeholder="メールアドレス"
-                        value={guest.email}
-                        onChange={(e) => updateGuest(index, 'email', e.target.value)}
-                        className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeGuest(index)}
-                        className="px-3 py-2 bg-red-100 text-red-600 rounded-md text-sm font-medium hover:bg-red-200"
-                      >
-                        削除
-                      </button>
-                    </div>
-                  ))}
-
-                  <button
-                    type="button"
-                    onClick={addGuest}
-                    className="w-full py-2 border-2 border-dashed border-gray-300 rounded-md text-sm text-gray-600 hover:bg-white hover:border-blue-400 hover:text-blue-600"
-                  >
-                    + ゲストを追加
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-blue-50 p-4 rounded-md">
-              <p className="text-sm text-blue-800">
-                <strong>設定内容：</strong>
-              </p>
-              <ul className="mt-2 text-sm text-blue-700 list-disc list-inside">
-                <li>営業時間: 9:00 - 18:00</li>
-                <li>休憩時間: 12:00 - 13:00</li>
-                <li>Googleカレンダーの予定と重複しない時間のみ予約可能</li>
-                <li>予約時にリアルタイムでカレンダーを確認します</li>
-              </ul>
-            </div>
 
             <div className="flex justify-end space-x-3">
               <button
@@ -760,10 +674,10 @@ export default function NewSchedulePage() {
               </button>
               <button
                 type="submit"
-                disabled={loading || loadingSlots || (isTeamSchedule && !selectedTeamId)}
+                disabled={saving || loadingSlots}
                 className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400"
               >
-                {loading ? '作成中...' : '予約カレンダー作成'}
+                {saving ? '更新中...' : '更新'}
               </button>
             </div>
           </form>

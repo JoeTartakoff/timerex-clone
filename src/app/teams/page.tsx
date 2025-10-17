@@ -46,144 +46,134 @@ export default function TeamsPage() {
     }
     
     setUser(user)
-    
-    // ⭐ 로그인 시 자동 매칭
+
     await updatePendingMemberships(user)
-    
     await fetchTeams(user.id, user.email!)
     setLoading(false)
   }
 
-  // ⭐ NEW: 로그인 시 pending 멤버십 업데이트
-const updatePendingMemberships = async (user: any) => {
-  try {
-    console.log('🔍 updatePendingMemberships 시작')
-    console.log('👤 User ID:', user.id)
-    console.log('📧 User Email:', user.email)
+  const updatePendingMemberships = async (user: any) => {
+    try {
+      console.log('🔍 updatePendingMemberships 시작')
+      console.log('👤 User ID:', user.id)
+      console.log('📧 User Email:', user.email)
 
-    const { data: pendingMemberships, error: queryError } = await supabase
-      .from('team_members')
-      .select('*')  // ⭐ * 로 변경 (전체 데이터 확인)
-      .eq('email', user.email)
-      .is('user_id', null)
+      const { data: pendingMemberships, error: queryError } = await supabase
+        .from('team_members')
+        .select('*')
+        .eq('email', user.email)
+        .is('user_id', null)
 
-    console.log('📊 Pending memberships:', pendingMemberships)
-    if (queryError) console.error('❌ 조회 에러:', queryError)
+      console.log('📊 Pending memberships:', pendingMemberships)
+      if (queryError) console.error('❌ 조회 에러:', queryError)
 
-    if (pendingMemberships && pendingMemberships.length > 0) {
-      console.log(`✅ Found ${pendingMemberships.length} pending team memberships`)
-      
-      for (const membership of pendingMemberships) {
-        console.log('🔄 Updating membership:', membership.id)
+      if (pendingMemberships && pendingMemberships.length > 0) {
+        console.log(`✅ Found ${pendingMemberships.length} pending team memberships`)
         
-        const { data: updated, error: updateError } = await supabase
-          .from('team_members')
-          .update({ user_id: user.id })
-          .eq('id', membership.id)
-          .select()
+        for (const membership of pendingMemberships) {
+          console.log('🔄 Updating membership:', membership.id)
+          
+          const { data: updated, error: updateError } = await supabase
+            .from('team_members')
+            .update({ user_id: user.id })
+            .eq('id', membership.id)
+            .select()
 
-        console.log('✅ Updated:', updated)
-        if (updateError) console.error('❌ 업데이트 에러:', updateError)
+          console.log('✅ Updated:', updated)
+          if (updateError) console.error('❌ 업데이트 에러:', updateError)
+        }
+        
+        console.log('✅ Team memberships updated!')
+      } else {
+        console.log('ℹ️ No pending memberships found')
       }
-      
-      console.log('✅ Team memberships updated!')
-    } else {
-      console.log('ℹ️ No pending memberships found')
+    } catch (error) {
+      console.error('❌ Error updating memberships:', error)
     }
-  } catch (error) {
-    console.error('❌ Error updating memberships:', error)
   }
-}
 
-const fetchTeams = async (userId: string, userEmail: string) => {
-  console.log('🔍 fetchTeams 시작')
-  console.log('👤 userId:', userId)
-  console.log('📧 userEmail:', userEmail)
+  const fetchTeams = async (userId: string, userEmail: string) => {
+    console.log('🔍 fetchTeams 시작')
+    console.log('👤 userId:', userId)
+    console.log('📧 userEmail:', userEmail)
 
-  // 내가 소유한 팀
-  const { data: ownedTeams, error: ownedError } = await supabase
-    .from('teams')
-    .select('*')
-    .eq('owner_id', userId)
-    .order('created_at', { ascending: false })
-
-  console.log('✅ 소유한 팀:', ownedTeams?.length || 0)
-  if (ownedError) console.error('❌ 소유 팀 조회 에러:', ownedError)
-
-  // ⭐ 1. user_id로 조회
-  const { data: memberTeamsByUserId, error: userIdError } = await supabase
-    .from('team_members')
-    .select('team_id')
-    .eq('user_id', userId)
-
-  console.log('✅ user_id로 찾은 팀:', memberTeamsByUserId?.length || 0)
-  if (userIdError) console.error('❌ user_id 조회 에러:', userIdError)
-
-  // ⭐ 2. email로 조회
-  const { data: memberTeamsByEmail, error: emailError } = await supabase
-    .from('team_members')
-    .select('team_id')
-    .eq('email', userEmail)
-
-  console.log('✅ email로 찾은 팀:', memberTeamsByEmail?.length || 0)
-  if (emailError) console.error('❌ email 조회 에러:', emailError)
-
-  // ⭐ 3. 합치기
-  const allMemberTeams = [
-    ...(memberTeamsByUserId || []),
-    ...(memberTeamsByEmail || [])
-  ]
-
-  console.log('✅ 전체 멤버 팀:', allMemberTeams.length)
-
-  if (allMemberTeams.length > 0) {
-    const memberTeamIds = [...new Set(allMemberTeams.map(m => m.team_id))]
-    console.log('✅ 중복 제거 후 팀 ID:', memberTeamIds)
-
-    const { data: memberTeamsData, error: teamsError } = await supabase
+    const { data: ownedTeams, error: ownedError } = await supabase
       .from('teams')
       .select('*')
-      .in('id', memberTeamIds)
+      .eq('owner_id', userId)
       .order('created_at', { ascending: false })
 
-    console.log('✅ 멤버 팀 데이터:', memberTeamsData?.length || 0)
-    if (teamsError) console.error('❌ 팀 데이터 조회 에러:', teamsError)
+    console.log('✅ 소유한 팀:', ownedTeams?.length || 0)
+    if (ownedError) console.error('❌ 소유 팀 조회 에러:', ownedError)
 
-    // 합치기 (중복 제거)
-    const allTeams = [...(ownedTeams || []), ...(memberTeamsData || [])]
-    const uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values())
-    
-    console.log('✅ 최종 팀 수:', uniqueTeams.length)
-    setTeams(uniqueTeams)
+    const { data: memberTeamsByUserId, error: userIdError } = await supabase
+      .from('team_members')
+      .select('team_id')
+      .eq('user_id', userId)
 
-    // 팀별 멤버 수 가져오기
-    const counts: Record<string, number> = {}
-    for (const team of uniqueTeams) {
-      const { count } = await supabase
-        .from('team_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('team_id', team.id)
+    console.log('✅ user_id로 찾은 팀:', memberTeamsByUserId?.length || 0)
+    if (userIdError) console.error('❌ user_id 조회 에러:', userIdError)
+
+    const { data: memberTeamsByEmail, error: emailError } = await supabase
+      .from('team_members')
+      .select('team_id')
+      .eq('email', userEmail)
+
+    console.log('✅ email로 찾은 팀:', memberTeamsByEmail?.length || 0)
+    if (emailError) console.error('❌ email 조회 에러:', emailError)
+
+    const allMemberTeams = [
+      ...(memberTeamsByUserId || []),
+      ...(memberTeamsByEmail || [])
+    ]
+
+    console.log('✅ 전체 멤버 팀:', allMemberTeams.length)
+
+    if (allMemberTeams.length > 0) {
+      const memberTeamIds = [...new Set(allMemberTeams.map(m => m.team_id))]
+      console.log('✅ 중복 제거 후 팀 ID:', memberTeamIds)
+
+      const { data: memberTeamsData, error: teamsError } = await supabase
+        .from('teams')
+        .select('*')
+        .in('id', memberTeamIds)
+        .order('created_at', { ascending: false })
+
+      console.log('✅ 멤버 팀 데이터:', memberTeamsData?.length || 0)
+      if (teamsError) console.error('❌ 팀 데이터 조회 에러:', teamsError)
+
+      const allTeams = [...(ownedTeams || []), ...(memberTeamsData || [])]
+      const uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values())
       
-      counts[team.id] = count || 0
-    }
-    setTeamMembersCount(counts)
-  } else {
-    console.log('⚠️ 멤버 팀 없음, 소유 팀만 표시')
-    setTeams(ownedTeams || [])
-    
-    // 팀별 멤버 수 가져오기
-    const counts: Record<string, number> = {}
-    for (const team of (ownedTeams || [])) {
-      const { count } = await supabase
-        .from('team_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('team_id', team.id)
+      console.log('✅ 최종 팀 수:', uniqueTeams.length)
+      setTeams(uniqueTeams)
+
+      const counts: Record<string, number> = {}
+      for (const team of uniqueTeams) {
+        const { count } = await supabase
+          .from('team_members')
+          .select('*', { count: 'exact', head: true })
+          .eq('team_id', team.id)
+        
+        counts[team.id] = count || 0
+      }
+      setTeamMembersCount(counts)
+    } else {
+      console.log('⚠️ 멤버 팀 없음, 소유 팀만 표시')
+      setTeams(ownedTeams || [])
       
-      counts[team.id] = count || 0
+      const counts: Record<string, number> = {}
+      for (const team of (ownedTeams || [])) {
+        const { count } = await supabase
+          .from('team_members')
+          .select('*', { count: 'exact', head: true })
+          .eq('team_id', team.id)
+        
+        counts[team.id] = count || 0
+      }
+      setTeamMembersCount(counts)
     }
-    setTeamMembersCount(counts)
   }
-}
 
   const createTeam = async () => {
     if (!teamName.trim()) {
@@ -192,7 +182,6 @@ const fetchTeams = async (userId: string, userEmail: string) => {
     }
 
     try {
-      // 팀 생성
       const { data: newTeam, error: teamError } = await supabase
         .from('teams')
         .insert({
@@ -205,7 +194,6 @@ const fetchTeams = async (userId: string, userEmail: string) => {
 
       if (teamError) throw teamError
 
-      // Owner를 team_members에 추가
       const { error: memberError } = await supabase
         .from('team_members')
         .insert({
@@ -262,44 +250,86 @@ const fetchTeams = async (userId: string, userEmail: string) => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center space-x-8">
-              <h1 className="text-xl font-bold text-gray-900">
-                Timerex
-              </h1>
-              <div className="flex space-x-4">
-                <Link
-                  href="/dashboard"
-                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  📅 スケジュール
-                </Link>
-                <Link
-                  href="/teams"
-                  className="text-blue-600 border-b-2 border-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  👥 チーム管理
-                </Link>
-              </div>
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* 왼쪽 사이드바 - Navigation만 */}
+      <aside className="w-64 bg-white shadow-lg flex flex-col">
+        <div className="p-6 border-b border-gray-200">
+          <h1 className="text-xl font-bold text-gray-900">Timerex</h1>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto p-4">
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                Navigation
+              </h2>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-700">{user?.email}</span>
-              <button
-                onClick={handleLogout}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+            <div className="space-y-1">
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50"
               >
-                ログアウト
-              </button>
+                <span>📅</span>
+                <span>スケジュール</span>
+              </Link>
+              <Link
+                href="/teams"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 font-medium"
+              >
+                <span>👥</span>
+                <span>チーム管理</span>
+              </Link>
             </div>
           </div>
-        </div>
-      </nav>
 
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                チーム一覧
+              </h2>
+            </div>
+            <div className="space-y-1">
+              {teams.length === 0 ? (
+                <p className="text-xs text-gray-500 px-3 py-2">
+                  チームがありません
+                </p>
+              ) : (
+                teams.map((team) => (
+                  <Link
+                    key={team.id}
+                    href={`/teams/${team.id}`}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span>👥</span>
+                      <span className="truncate">{team.name}</span>
+                    </div>
+                    <span className="text-xs bg-gray-200 px-2 py-0.5 rounded-full">
+                      {teamMembersCount[team.id] || 0}
+                    </span>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+        </nav>
+
+        <div className="p-4 border-t border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-700 truncate">{user?.email}</span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            ログアウト
+          </button>
+        </div>
+      </aside>
+
+      {/* 메인 컨텐츠 영역 */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-2xl font-bold text-gray-900">チーム管理</h2>
             <button

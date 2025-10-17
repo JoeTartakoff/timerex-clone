@@ -36,6 +36,7 @@ interface Schedule {
   interview_time_start: string | null
   interview_time_end: string | null
   folder_id: string | null
+  team_id: string | null  
 }
 
 interface GuestPreset {
@@ -135,7 +136,6 @@ export default function DashboardPage() {
       
       setFolders(foldersData || [])
 
-      // 개인 스케줄 가져오기
       console.log('📅 개인 스케줄 조회 시작...')
       const { data: personalSchedules, error: personalError } = await supabase
         .from('schedules')
@@ -152,7 +152,6 @@ export default function DashboardPage() {
         return
       }
 
-      // 내가 속한 팀의 스케줄 가져오기
       const { data: myTeams } = await supabase
         .from('team_members')
         .select('team_id')
@@ -171,11 +170,9 @@ export default function DashboardPage() {
         teamSchedules = teamSchedulesData || []
       }
 
-      // 개인 스케줄 + 팀 스케줄 합치기
       const allSchedules = [...(personalSchedules || []), ...teamSchedules]
       setSchedules(allSchedules)
 
-      // 게스트 정보 가져오기
       if (allSchedules && allSchedules.length > 0) {
         const presetsMap: Record<string, GuestPreset[]> = {}
         const responsesMap: Record<string, GuestResponse[]> = {}
@@ -212,7 +209,6 @@ export default function DashboardPage() {
       setSchedules([])
     }
   }
-
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -282,7 +278,7 @@ export default function DashboardPage() {
     } else if (quickGuestInfo.name && quickGuestInfo.email) {
       alert(`${quickGuestInfo.name}様専用リンクをコピーしました！\n何度でも予約可能なリンクです。`)
     } else {
-      alert('固定リンクをコピーしました！\n何度でも予約可能なリンクです。')
+      alert('複数回予約可能リンクをコピーしました！\n何度でも予約可能なリンクです。')
     }
   }
 
@@ -471,127 +467,160 @@ export default function DashboardPage() {
     )
   }
 
-  const filteredSchedules = selectedFolder
-    ? schedules.filter(s => s.folder_id === selectedFolder)
-    : selectedFolder === 'uncategorized'
+  const filteredSchedules = selectedFolder === 'uncategorized'
     ? schedules.filter(s => !s.folder_id)
+    : selectedFolder
+    ? schedules.filter(s => s.folder_id === selectedFolder)
     : schedules
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center space-x-8">
-              <h1 className="text-xl font-bold text-gray-900">
-                Timerex
-              </h1>
-              <div className="flex space-x-4">
-                <Link
-                  href="/dashboard"
-                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  📅 スケジュール
-                </Link>
-                <Link
-                  href="/teams"
-                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  👥 チーム管理
-                </Link>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-700">{user?.email}</span>
-              <button
-                onClick={handleLogout}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-              >
-                ログアウト
-              </button>
-            </div>
-          </div>
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* 왼쪽 사이드바 - 폴더 목록 */}
+      <aside className="w-64 bg-white shadow-lg flex flex-col">
+        <div className="p-6 border-b border-gray-200">
+          <h1 className="text-xl font-bold text-gray-900">Timerex</h1>
         </div>
-      </nav>
 
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
+        <nav className="flex-1 overflow-y-auto p-4">
           <div className="mb-6">
-            <Link
-              href="/schedules/new"
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-            >
-              + 新しいスケジュール作成
-            </Link>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                Navigation
+              </h2>
+            </div>
+            <div className="space-y-1">
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 font-medium"
+              >
+                <span>📅</span>
+                <span>スケジュール</span>
+              </Link>
+              <Link
+                href="/teams"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                <span>👥</span>
+                <span>チーム管理</span>
+              </Link>
+            </div>
           </div>
 
-          <div className="mb-6 bg-white shadow rounded-lg p-4">
+          <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-gray-900">
-                📁 フォルダ
-              </h3>
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                フォルダ
+              </h2>
               <button
                 onClick={() => openFolderModal()}
-                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                className="text-blue-600 hover:text-blue-700 text-xl"
+                title="新規フォルダ作成"
               >
-                + 新規作成
+                +
               </button>
             </div>
 
             <div className="space-y-1">
               <button
                 onClick={() => setSelectedFolder(null)}
-                className={`w-full text-left px-3 py-2 rounded-md text-sm ${
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
                   selectedFolder === null
                     ? 'bg-blue-50 text-blue-700 font-medium'
                     : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                📋 すべて ({schedules.length})
+                <div className="flex items-center gap-2">
+                  <span>📋</span>
+                  <span>すべて</span>
+                </div>
+                <span className="text-xs bg-gray-200 px-2 py-0.5 rounded-full">
+                  {schedules.length}
+                </span>
               </button>
 
               <button
                 onClick={() => setSelectedFolder('uncategorized')}
-                className={`w-full text-left px-3 py-2 rounded-md text-sm ${
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
                   selectedFolder === 'uncategorized'
                     ? 'bg-blue-50 text-blue-700 font-medium'
                     : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                📂 未分類 ({schedules.filter(s => !s.folder_id).length})
+                <div className="flex items-center gap-2">
+                  <span>📂</span>
+                  <span>未分類</span>
+                </div>
+                <span className="text-xs bg-gray-200 px-2 py-0.5 rounded-full">
+                  {schedules.filter(s => !s.folder_id).length}
+                </span>
               </button>
 
               {folders.map((folder) => (
-                <div key={folder.id} className="flex items-center gap-2">
+                <div key={folder.id} className="group relative">
                   <button
                     onClick={() => setSelectedFolder(folder.id)}
-                    className={`flex-1 text-left px-3 py-2 rounded-md text-sm ${
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
                       selectedFolder === folder.id
                         ? 'bg-blue-50 text-blue-700 font-medium'
                         : 'text-gray-700 hover:bg-gray-50'
                     }`}
                   >
-                    📁 {folder.name} ({schedules.filter(s => s.folder_id === folder.id).length})
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span>📁</span>
+                      <span className="truncate">{folder.name}</span>
+                    </div>
+                    <span className="text-xs bg-gray-200 px-2 py-0.5 rounded-full">
+                      {schedules.filter(s => s.folder_id === folder.id).length}
+                    </span>
                   </button>
-                  <button
-                    onClick={() => openFolderModal(folder)}
-                    className="p-2 text-gray-400 hover:text-gray-600"
-                    title="編集"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => deleteFolder(folder.id)}
-                    className="p-2 text-gray-400 hover:text-red-600"
-                    title="削除"
-                  >
-                    🗑️
-                  </button>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openFolderModal(folder)
+                      }}
+                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
+                      title="編集"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteFolder(folder.id)
+                      }}
+                      className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                      title="削除"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
+        </nav>
 
+        <div className="p-4 border-t border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-700 truncate">{user?.email}</span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            ログアウト
+          </button>
+        </div>
+      </aside>
+
+      {/* 메인 컨텐츠 영역 */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="mb-6 bg-white shadow rounded-lg p-4">
             <h3 className="text-sm font-medium text-gray-900 mb-3">
               📝 クイックゲスト情報入力 (オプション)
@@ -638,17 +667,26 @@ export default function DashboardPage() {
             )}
           </div>
 
+          <div className="mb-6">
+            <Link
+              href="/schedules/new"
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+            >
+              + 予約カレンダー作成
+            </Link>
+          </div>
+
           <div className="bg-white shadow rounded-lg">
             <div className="px-6 py-4 border-b border-gray-200">
               <h2 className="text-lg font-medium text-gray-900">
-                作成したスケジュール
+                作成した予約カレンダー
               </h2>
             </div>
 
             {filteredSchedules.length === 0 ? (
               <div className="px-6 py-8 text-center">
                 <p className="text-gray-500">
-                  {selectedFolder ? 'このフォルダにスケジュールがありません。' : 'まだスケジュールがありません。新しいスケジュールを作成してください。'}
+                  {selectedFolder ? 'このフォルダに予約カレンダーがありません。' : 'まだ予約カレンダーがありません。新しい予約カレンダーを作成してください。'}
                 </p>
               </div>
             ) : (
@@ -780,6 +818,12 @@ export default function DashboardPage() {
                       </div>
                       
                       <div className="ml-4 flex items-center gap-2">
+                        <Link
+                          href={`/schedules/${schedule.id}/edit`}
+                          className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 whitespace-nowrap"
+                        >
+                          編集
+                        </Link>
                         {!schedule.is_candidate_mode && !schedule.is_interview_mode && (
                           <button
                             onClick={() => copyOneTimeLink(schedule.share_link)}
@@ -798,7 +842,7 @@ export default function DashboardPage() {
                               : 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
                           }`}
                         >
-                          {schedule.is_interview_mode ? '面接リンクコピー' : schedule.is_candidate_mode ? '候補リンクコピー' : '固定リンクコピー'}
+                          {schedule.is_interview_mode ? '面接リンクコピー' : schedule.is_candidate_mode ? '候補リンクコピー' : '複数回予約可能リンクコピー'}
                         </button>
                         <button
                           onClick={() => deleteSchedule(schedule.id)}
@@ -854,7 +898,6 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-
     </div>
   )
 }

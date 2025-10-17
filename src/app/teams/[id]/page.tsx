@@ -34,6 +34,8 @@ export default function TeamDetailPage() {
   const [isOwner, setIsOwner] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [newMemberEmail, setNewMemberEmail] = useState('')
+  const [allTeams, setAllTeams] = useState<Team[]>([])
+  const [teamMembersCount, setTeamMembersCount] = useState<Record<string, number>>({})
 
   useEffect(() => {
     checkUser()
@@ -48,12 +50,12 @@ export default function TeamDetailPage() {
     }
     
     setUser(user)
-    await fetchTeamData(user.id)
+    await fetchTeamData(user.id, user.email!)
     setLoading(false)
   }
 
-  const fetchTeamData = async (userId: string) => {
-    // 팀 정보 가져오기
+  const fetchTeamData = async (userId: string, userEmail: string) => {
+    // 현재 팀 정보 가져오기
     const { data: teamData, error: teamError } = await supabase
       .from('teams')
       .select('*')
@@ -77,6 +79,68 @@ export default function TeamDetailPage() {
       .order('joined_at', { ascending: true })
 
     setMembers(membersData || [])
+
+    // 사이드바용 전체 팀 목록 가져오기
+    const { data: ownedTeams } = await supabase
+      .from('teams')
+      .select('*')
+      .eq('owner_id', userId)
+      .order('created_at', { ascending: false })
+
+    const { data: memberTeamsByUserId } = await supabase
+      .from('team_members')
+      .select('team_id')
+      .eq('user_id', userId)
+
+    const { data: memberTeamsByEmail } = await supabase
+      .from('team_members')
+      .select('team_id')
+      .eq('email', userEmail)
+
+    const allMemberTeams = [
+      ...(memberTeamsByUserId || []),
+      ...(memberTeamsByEmail || [])
+    ]
+
+    if (allMemberTeams.length > 0) {
+      const memberTeamIds = [...new Set(allMemberTeams.map(m => m.team_id))]
+
+      const { data: memberTeamsData } = await supabase
+        .from('teams')
+        .select('*')
+        .in('id', memberTeamIds)
+        .order('created_at', { ascending: false })
+
+      const allTeamsData = [...(ownedTeams || []), ...(memberTeamsData || [])]
+      const uniqueTeams = Array.from(new Map(allTeamsData.map(t => [t.id, t])).values())
+      
+      setAllTeams(uniqueTeams)
+
+      // 팀별 멤버 수 가져오기
+      const counts: Record<string, number> = {}
+      for (const team of uniqueTeams) {
+        const { count } = await supabase
+          .from('team_members')
+          .select('*', { count: 'exact', head: true })
+          .eq('team_id', team.id)
+        
+        counts[team.id] = count || 0
+      }
+      setTeamMembersCount(counts)
+    } else {
+      setAllTeams(ownedTeams || [])
+      
+      const counts: Record<string, number> = {}
+      for (const team of (ownedTeams || [])) {
+        const { count } = await supabase
+          .from('team_members')
+          .select('*', { count: 'exact', head: true })
+          .eq('team_id', team.id)
+        
+        counts[team.id] = count || 0
+      }
+      setTeamMembersCount(counts)
+    }
   }
 
   const addMember = async () => {
@@ -85,14 +149,13 @@ export default function TeamDetailPage() {
       return
     }
 
-    // 이메일 형식 검증
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(newMemberEmail)) {
       alert('正しいメールアドレスを入力してください')
       return
     }
 
-   const { data: existing } = await supabase
+    const { data: existing } = await supabase
       .from('team_members')
       .select('id')
       .eq('team_id', teamId)
@@ -104,12 +167,11 @@ export default function TeamDetailPage() {
     }
 
     try {
-      // user_id는 NULL로 (나중에 해당 이메일로 로그인하면 자동 매칭)
       const { data, error: insertError } = await supabase
         .from('team_members')
         .insert({
           team_id: teamId,
-          user_id: null,  // NULL로 변경
+          user_id: null,
           email: newMemberEmail.toLowerCase(),
           role: 'member',
         })
@@ -130,7 +192,7 @@ export default function TeamDetailPage() {
       setShowAddModal(false)
       
       if (user) {
-        await fetchTeamData(user.id)
+        await fetchTeamData(user.id, user.email!)
       }
     } catch (error) {
       console.error('Error adding member:', error)
@@ -152,7 +214,7 @@ export default function TeamDetailPage() {
       alert('メンバーを削除しました')
       
       if (user) {
-        await fetchTeamData(user.id)
+        await fetchTeamData(user.id, user.email!)
       }
     } catch (error) {
       console.error('Error removing member:', error)
@@ -178,44 +240,90 @@ export default function TeamDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center space-x-8">
-              <h1 className="text-xl font-bold text-gray-900">
-                Timerex
-              </h1>
-              <div className="flex space-x-4">
-                <Link
-                  href="/dashboard"
-                  className="text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  📅 スケジュール
-                </Link>
-                <Link
-                  href="/teams"
-                  className="text-blue-600 border-b-2 border-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  👥 チーム管理
-                </Link>
-              </div>
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* 왼쪽 사이드바 */}
+      <aside className="w-64 bg-white shadow-lg flex flex-col">
+        <div className="p-6 border-b border-gray-200">
+          <h1 className="text-xl font-bold text-gray-900">Timerex</h1>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto p-4">
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                Navigation
+              </h2>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-700">{user?.email}</span>
-              <button
-                onClick={handleLogout}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+            <div className="space-y-1">
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50"
               >
-                ログアウト
-              </button>
+                <span>📅</span>
+                <span>スケジュール</span>
+              </Link>
+              <Link
+                href="/teams"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 font-medium"
+              >
+                <span>👥</span>
+                <span>チーム管理</span>
+              </Link>
             </div>
           </div>
-        </div>
-      </nav>
 
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                チーム一覧
+              </h2>
+            </div>
+            <div className="space-y-1">
+              {allTeams.length === 0 ? (
+                <p className="text-xs text-gray-500 px-3 py-2">
+                  チームがありません
+                </p>
+              ) : (
+                allTeams.map((t) => (
+                  <Link
+                    key={t.id}
+                    href={`/teams/${t.id}`}
+                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
+                      t.id === teamId
+                        ? 'bg-blue-50 text-blue-700 font-medium'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span>👥</span>
+                      <span className="truncate">{t.name}</span>
+                    </div>
+                    <span className="text-xs bg-gray-200 px-2 py-0.5 rounded-full">
+                      {teamMembersCount[t.id] || 0}
+                    </span>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+        </nav>
+
+        <div className="p-4 border-t border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-700 truncate">{user?.email}</span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            ログアウト
+          </button>
+        </div>
+      </aside>
+
+      {/* 메인 컨텐츠 영역 */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="mb-6">
             <Link
               href="/teams"
