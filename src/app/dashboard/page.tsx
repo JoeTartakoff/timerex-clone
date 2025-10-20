@@ -478,7 +478,7 @@ export default function DashboardPage() {
       {/* 왼쪽 사이드바 - 폴더 목록 */}
       <aside className="w-64 bg-white shadow-lg flex flex-col">
         <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-900">Timerex</h1>
+          <h1 className="text-xl font-bold text-gray-900">ヤクソクーAI</h1>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-4">
