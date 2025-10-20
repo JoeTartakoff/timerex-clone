@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ヤクソクーAI",
+  title: "ヤクソクAI",
   description: "AIを活用したスケジュール調整システム",
 };
 
