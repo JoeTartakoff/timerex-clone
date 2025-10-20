@@ -270,7 +270,7 @@ export default function DashboardPage() {
     if (isInterviewMode && quickGuestInfo.name && quickGuestInfo.email) {
       alert(`${quickGuestInfo.name}様専用面接リンクをコピーしました！\nゲストが自由に候補時間を提案できます。`)
     } else if (isInterviewMode) {
-      alert('候補日受取モードのリンクをコピーしました！\nゲストが自由に候補時間を提案できます。')
+      alert('面接モードのリンクをコピーしました！\nゲストが自由に候補時間を提案できます。')
     } else if (isCandidateMode && quickGuestInfo.name && quickGuestInfo.email) {
       alert(`${quickGuestInfo.name}様専用候補リンクをコピーしました！\nゲストは複数の候補から選択できます。`)
     } else if (isCandidateMode) {
@@ -706,7 +706,7 @@ export default function DashboardPage() {
                           )}
                           {schedule.is_interview_mode && (
                             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                              🎤 候補日受取モード
+                              🎤 面接モード
                             </span>
                           )}
                         </div>
