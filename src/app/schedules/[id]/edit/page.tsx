@@ -180,7 +180,6 @@ export default function EditSchedulePage() {
         setHasBreakTime(!!(schedule.interview_break_start && schedule.interview_break_end))
       } else if (schedule.is_candidate_mode) {
         setScheduleMode('candidate')
-        // 기존 후보 시간 로드
         if (schedule.candidate_slots) {
           setCandidateSlots(schedule.candidate_slots)
         }
@@ -294,13 +293,11 @@ export default function EditSchedulePage() {
         time_slot_duration: formData.timeSlotDuration,
       }
 
-      // 예약이 없으면 날짜도 변경 가능
       if (!hasBookings) {
         updateData.date_range_start = formData.dateRangeStart
         updateData.date_range_end = formData.dateRangeEnd
       }
 
-      // 면접 모드 설정
       if (scheduleMode === 'interview') {
         updateData.is_interview_mode = true
         updateData.is_candidate_mode = false
@@ -386,7 +383,6 @@ export default function EditSchedulePage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* 예약 모드 표시 (변경 불가) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-3">
                 予約モード (変更不可)
@@ -404,11 +400,11 @@ export default function EditSchedulePage() {
                     ? 'border-purple-500 bg-purple-50 text-purple-700'
                     : 'border-gray-200 bg-gray-100 text-gray-400'
                 }`}>
-                  📋 候補日を提示
+                  📋 候補時間を提示
                 </div>
                 <div className={`px-4 py-3 rounded-lg border-2 text-sm font-medium text-center ${
                   scheduleMode === 'interview'
-                    ? 'border-green-500 bg-green-50 text-green-700'
+                    ? 'border-orange-500 bg-orange-50 text-orange-700'
                     : 'border-gray-200 bg-gray-100 text-gray-400'
                 }`}>
                   🎤 候補日を受取
@@ -446,7 +442,6 @@ export default function EditSchedulePage() {
               />
             </div>
 
-            {/* 팀 스케줄 표시 (변경 불가) */}
             {isTeamSchedule && (
               <div className="border-t pt-6">
                 <label className="block text-sm font-medium text-gray-700 mb-3">
@@ -521,7 +516,6 @@ export default function EditSchedulePage() {
               </select>
             </div>
 
-            {/* 候補日を提示 モード */}
             {scheduleMode === 'candidate' && (
               <div className="space-y-3 bg-purple-50 p-4 rounded-md border border-purple-200">
                 <p className="text-sm text-purple-800">
@@ -588,10 +582,9 @@ export default function EditSchedulePage() {
               </div>
             )}
 
-            {/* 候補日を受取 モード 설정 */}
             {scheduleMode === 'interview' && (
-              <div className="space-y-3 bg-green-50 p-4 rounded-md border border-green-200">
-                <p className="text-sm text-green-800">
+              <div className="space-y-3 bg-orange-50 p-4 rounded-md border border-orange-200">
+                <p className="text-sm text-orange-800">
                   営業時間を設定してください。
                 </p>
 

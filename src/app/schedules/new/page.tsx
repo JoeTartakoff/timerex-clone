@@ -326,66 +326,61 @@ export default function NewSchedulePage() {
 
       <main className="max-w-3xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="bg-white shadow rounded-lg p-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                予約モード *
+              </label>
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setScheduleMode('normal')}
+                  className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                    scheduleMode === 'normal'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  📅 通常予約
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScheduleMode('candidate')}
+                  className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                    scheduleMode === 'candidate'
+                      ? 'border-purple-500 bg-purple-50 text-purple-700'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  📋 候補時間を提示
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScheduleMode('interview')}
+                  className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                    scheduleMode === 'interview'
+                      ? 'border-orange-500 bg-orange-50 text-orange-700'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  🎤 候補日を受取
+                </button>
+              </div>
+            </div>
 
-
-<form onSubmit={handleSubmit} className="space-y-6">
-  <div>
-    <label className="block text-sm font-medium text-gray-700 mb-3">
-      予約モード *
-    </label>
-    <div className="grid grid-cols-3 gap-3">
-      <button
-        type="button"
-        onClick={() => setScheduleMode('normal')}
-        className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
-          scheduleMode === 'normal'
-            ? 'border-blue-500 bg-blue-50 text-blue-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-        }`}
-      >
-        📅 通常予約
-      </button>
-      <button
-        type="button"
-        onClick={() => setScheduleMode('candidate')}
-        className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
-          scheduleMode === 'candidate'
-            ? 'border-purple-500 bg-purple-50 text-purple-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-        }`}
-      >
-        📋 候補日を提示
-      </button>
-      <button
-        type="button"
-        onClick={() => setScheduleMode('interview')}
-        className={`px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all ${
-          scheduleMode === 'interview'
-            ? 'border-green-500 bg-green-50 text-green-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-        }`}
-      >
-        🎤 候補日を受取
-      </button>
-    </div>
-  </div>
-
-  {/* 그 다음 스케줄 타이틀 */}
-  <div>
-    <label className="block text-sm font-medium text-gray-700">
-      スケジュールタイトル *
-    </label>
-    <input
-      type="text"
-      required
-      value={formData.title}
-      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-      placeholder="例：打ち合わせ予約"
-    />
-  </div>
-
-  {/* 나머지 필드들은 그대로... */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                スケジュールタイトル *
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                placeholder="例：打ち合わせ予約"
+              />
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700">
@@ -527,7 +522,6 @@ export default function NewSchedulePage() {
               </select>
             </div>
 
-            {/* 候補日を提示 モード */}
             {scheduleMode === 'candidate' && (
               <div className="space-y-3 bg-purple-50 p-4 rounded-md border border-purple-200">
                 <p className="text-sm text-purple-800">
@@ -594,10 +588,9 @@ export default function NewSchedulePage() {
               </div>
             )}
 
-            {/* 候補日を受取 モード */}
             {scheduleMode === 'interview' && (
-              <div className="space-y-3 bg-green-50 p-4 rounded-md border border-green-200">
-                <p className="text-sm text-green-800">
+              <div className="space-y-3 bg-orange-50 p-4 rounded-md border border-orange-200">
+                <p className="text-sm text-orange-800">
                   営業時間を設定してください。ゲストはこの時間範囲内で自由に候補時間を提案できます。<br />
                   ホストのカレンダー情報はゲストに表示されません。
                 </p>
@@ -669,8 +662,8 @@ export default function NewSchedulePage() {
                   </div>
                 )}
 
-                <div className="mt-3 p-3 bg-green-100 rounded-md">
-                  <p className="text-sm font-medium text-green-900">
+                <div className="mt-3 p-3 bg-orange-100 rounded-md">
+                  <p className="text-sm font-medium text-orange-900">
                     設定時間: {interviewTimeSettings.startTime} - {interviewTimeSettings.endTime}
                     {hasBreakTime && ` （休憩: ${interviewTimeSettings.breakStart} - ${interviewTimeSettings.breakEnd}）`}
                   </p>
@@ -678,7 +671,6 @@ export default function NewSchedulePage() {
               </div>
             )}
 
-            {/* 게스트 사전 입력 섹션 */}
             <div className="border-t pt-6">
               <div className="flex items-center justify-between mb-3">
                 <label className="flex items-center gap-2 cursor-pointer">

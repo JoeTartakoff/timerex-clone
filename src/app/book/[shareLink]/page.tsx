@@ -32,6 +32,38 @@ interface User {
   }
 }
 
+// ⭐ 주간 날짜 계산 함수
+function getWeekDates(baseDate: Date): Date[] {
+  const dates: Date[] = []
+  const day = baseDate.getDay() // 0(일) ~ 6(토)
+  
+  // 월요일(1)부터 시작하도록 조정
+  const diff = day === 0 ? -6 : 1 - day
+  const monday = new Date(baseDate)
+  monday.setDate(baseDate.getDate() + diff)
+  
+  // 월~토 (6일)
+  for (let i = 0; i < 6; i++) {
+    const date = new Date(monday)
+    date.setDate(monday.getDate() + i)
+    dates.push(date)
+  }
+  
+  return dates
+}
+
+// ⭐ 날짜가 범위 내에 있는지 확인
+function isDateInRange(date: Date, start: string, end: string): boolean {
+  const dateStr = date.toISOString().split('T')[0]
+  return dateStr >= start && dateStr <= end
+}
+
+// ⭐ 주의 시작일이 범위 내에 있는지 확인
+function isWeekInRange(weekStart: Date, rangeStart: string, rangeEnd: string): boolean {
+  const weekDates = getWeekDates(weekStart)
+  return weekDates.some(date => isDateInRange(date, rangeStart, rangeEnd))
+}
+
 export default function BookingPage() {
   const params = useParams()
   const shareLink = params.shareLink as string
@@ -50,13 +82,20 @@ export default function BookingPage() {
   const [isOneTimeMode, setIsOneTimeMode] = useState(false)
   const [oneTimeToken, setOneTimeToken] = useState<string | null>(null)
   const [tokenAlreadyUsed, setTokenAlreadyUsed] = useState(false)
-  
-  // ⭐ 게스트 프리셋 관련 상태 추가
   const [isPrefilledGuest, setIsPrefilledGuest] = useState(false)
   const [guestToken, setGuestToken] = useState<string | null>(null)
 
+  // ⭐ 주간 뷰 상태
+  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(new Date())
+  const [weekDates, setWeekDates] = useState<Date[]>([])
+
   const initRef = useRef(false)
   const guestLoginProcessedRef = useRef(false)
+
+  // ⭐ 주간 날짜 업데이트
+  useEffect(() => {
+    setWeekDates(getWeekDates(currentWeekStart))
+  }, [currentWeekStart])
 
   // 스케줄 데이터 로드
   const fetchScheduleData = async (guestUserId?: string) => {
@@ -78,6 +117,10 @@ export default function BookingPage() {
       if (scheduleError) throw scheduleError
 
       setSchedule(scheduleData)
+
+      // ⭐ 스케줄 기간의 첫 주로 초기화
+      const startDate = new Date(scheduleData.date_range_start)
+      setCurrentWeekStart(startDate)
 
       // Google Calendar API로 실시간 슬롯 가져오기
       try {
@@ -138,7 +181,6 @@ export default function BookingPage() {
     }
   }
 
-  // ⭐ 게스트 프리셋 로드
   const fetchGuestPreset = async (token: string) => {
     try {
       console.log('🔍 Fetching guest preset for token:', token)
@@ -155,7 +197,6 @@ export default function BookingPage() {
         })
         setIsPrefilledGuest(true)
         
-        // 알림 표시
         setTimeout(() => {
           alert(`${data.guestName}様専用リンクです\n情報が自動入力されました`)
         }, 500)
@@ -167,7 +208,6 @@ export default function BookingPage() {
     }
   }
 
-  // ⭐ 초기 로드
   useEffect(() => {
     if (initRef.current) return
     initRef.current = true
@@ -177,9 +217,8 @@ export default function BookingPage() {
     const urlParams = new URLSearchParams(window.location.search)
     const mode = urlParams.get('mode')
     const token = urlParams.get('token')
-    const guestParam = urlParams.get('guest') // ⭐ 게스트 토큰
+    const guestParam = urlParams.get('guest')
     
-    // ⭐ 게스트 프리셋 토큰 확인
     if (guestParam) {
       console.log('👤 Guest token detected:', guestParam)
       setGuestToken(guestParam)
@@ -214,7 +253,6 @@ export default function BookingPage() {
           console.log('👤 User logged in:', user.email)
           setGuestUser(user as User)
           
-          // ⭐ 게스트 프리셋이 없을 때만 자동 입력
           if (!guestParam) {
             setGuestInfo({
               name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
@@ -406,6 +444,43 @@ export default function BookingPage() {
     }
   }
 
+  // ⭐ 이전 주로 이동
+  const goToPrevWeek = () => {
+    if (!schedule) return
+    
+    const prevWeek = new Date(currentWeekStart)
+    prevWeek.setDate(currentWeekStart.getDate() - 7)
+    
+    if (isWeekInRange(prevWeek, schedule.date_range_start, schedule.date_range_end)) {
+      setCurrentWeekStart(prevWeek)
+    }
+  }
+
+  // ⭐ 다음 주로 이동
+  const goToNextWeek = () => {
+    if (!schedule) return
+    
+    const nextWeek = new Date(currentWeekStart)
+    nextWeek.setDate(currentWeekStart.getDate() + 7)
+    
+    if (isWeekInRange(nextWeek, schedule.date_range_start, schedule.date_range_end)) {
+      setCurrentWeekStart(nextWeek)
+    }
+  }
+
+  // ⭐ 이전/다음 주 버튼 활성화 여부
+  const canGoPrev = schedule ? isWeekInRange(
+    new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000),
+    schedule.date_range_start,
+    schedule.date_range_end
+  ) : false
+
+  const canGoNext = schedule ? isWeekInRange(
+    new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000),
+    schedule.date_range_start,
+    schedule.date_range_end
+  ) : false
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -448,19 +523,37 @@ export default function BookingPage() {
     )
   }
 
-  const slotsByDate = availableSlots.reduce((acc, slot) => {
+  // ⭐ 주간별 슬롯 그룹화
+  const slotsByDateAndTime = availableSlots.reduce((acc, slot) => {
     if (!acc[slot.date]) {
-      acc[slot.date] = []
+      acc[slot.date] = {}
     }
-    acc[slot.date].push(slot)
+    const timeKey = `${slot.start_time}-${slot.end_time}`
+    if (!acc[slot.date][timeKey]) {
+      acc[slot.date][timeKey] = []
+    }
+    acc[slot.date][timeKey].push(slot)
     return acc
-  }, {} as Record<string, AvailabilitySlot[]>)
+  }, {} as Record<string, Record<string, AvailabilitySlot[]>>)
+
+  // ⭐ 모든 시간대 추출 (정렬)
+  const allTimeSlots = Array.from(
+    new Set(
+      availableSlots.map(slot => `${slot.start_time}-${slot.end_time}`)
+    )
+  ).sort()
+
+  // ⭐ 현재 주의 날짜만 필터링
+  const currentWeekDates = weekDates.filter(date => 
+    isDateInRange(date, schedule.date_range_start, schedule.date_range_end)
+  )
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* ⭐ 1. 헤더 박스 (제목 + Google 로그인) */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start justify-between mb-4">
             <div className="flex-1">
               <h1 className="text-2xl font-bold text-gray-900 mb-2">
                 {schedule.title}
@@ -474,22 +567,22 @@ export default function BookingPage() {
               </div>
             </div>
             
-            <div className="ml-4 flex flex-col gap-2">
-              {isOneTimeMode && (
-                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                  🔒 ワンタイムリンク
-                </span>
-              )}
-              {/* ⭐ 게스트 프리셋 표시 */}
-              {isPrefilledGuest && (
-                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  ✅ 専用リンク
-                </span>
-              )}
-            </div>
+<div className="ml-4 flex flex-col gap-2">
+  {isOneTimeMode && (
+    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+      🔒 ワンタイムリンク
+    </span>
+  )}
+  {isPrefilledGuest && (
+    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+      ✅ 専用リンク
+    </span>
+  )}
+</div>
           </div>
 
-          <div className="mt-6 pt-6 border-t border-gray-200">
+          {/* Google 로그인 섹션 */}
+          <div className="pt-6 border-t border-gray-200">
             {guestUser ? (
               <div className="flex items-center justify-between bg-blue-50 p-4 rounded-lg">
                 <div className="flex items-center space-x-3">
@@ -528,149 +621,191 @@ export default function BookingPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <div className="bg-white shadow rounded-lg p-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">
-                予約可能な時間を選択
-              </h2>
+        {/* ⭐ 2. 예약 정보 박스 (항상 표시) */}
+        <div className="bg-white shadow rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-medium text-gray-900 mb-4">
+            予約情報
+          </h2>
 
-              {isLoadingSlots ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-500">カレンダーを確認中...</p>
+          {selectedSlot ? (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="bg-blue-50 p-4 rounded-md mb-4">
+                <p className="text-sm font-medium text-blue-900">
+                  選択した時間
+                </p>
+                <p className="text-sm text-blue-700 mt-1">
+                  {new Date(selectedSlot.date).toLocaleDateString('ja-JP')}
+                </p>
+                <p className="text-sm text-blue-700">
+                  {selectedSlot.start_time.slice(0, 5)} - {selectedSlot.end_time.slice(0, 5)}
+                </p>
+              </div>
+
+              {isOneTimeMode && (
+                <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
+                  <p className="text-xs text-yellow-800 font-medium">
+                    ⚠️ ワンタイムリンク
+                  </p>
+                  <p className="text-xs text-yellow-700 mt-1">
+                    予約完了後、このリンクは無効化されます
+                  </p>
                 </div>
-              ) : Object.keys(slotsByDate).length === 0 ? (
-                <p className="text-gray-500">予約可能な時間がありません。</p>
-              ) : (
-                <div className="space-y-6">
-                  {Object.entries(slotsByDate).map(([date, slots]) => (
-                    <div key={date}>
-                      <h3 className="text-sm font-medium text-gray-700 mb-3">
-                        {new Date(date).toLocaleDateString('ja-JP', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                          weekday: 'long',
-                        })}
-                      </h3>
-                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                        {slots.map((slot) => {
-                          const selected = selectedSlot?.id === slot.id
+              )}
+
+              {isPrefilledGuest && (
+                <div className="bg-green-50 p-3 rounded-md border border-green-200">
+                  <p className="text-xs text-green-800 font-medium">
+                    ✅ 専用リンク
+                  </p>
+                  <p className="text-xs text-green-700 mt-1">
+                    情報が自動入力されています
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  お名前 *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={guestInfo.name}
+                  onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
+                  disabled={!!guestUser || isPrefilledGuest}
+                  className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 ${
+                    (guestUser || isPrefilledGuest) ? 'bg-gray-100' : ''
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  メールアドレス *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={guestInfo.email}
+                  onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
+                  disabled={!!guestUser || isPrefilledGuest}
+                  className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 ${
+                    (guestUser || isPrefilledGuest) ? 'bg-gray-100' : ''
+                  }`}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-md disabled:bg-gray-400"
+              >
+                {submitting ? '予約中...' : '予約を確定する'}
+              </button>
+            </form>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-gray-500">
+                下のカレンダーから予約可能な時間を選択してください
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ⭐ 3. 캘린더 박스 */}
+        <div className="bg-white shadow rounded-lg p-6">
+          {/* 월 표시 + 이전/다음 버튼 */}
+          <div className="flex items-center justify-between mb-6">
+            <button
+              onClick={goToPrevWeek}
+              disabled={!canGoPrev}
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Prev
+            </button>
+            
+            <h2 className="text-lg font-medium text-gray-900">
+              {currentWeekStart.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
+            </h2>
+            
+            <button
+              onClick={goToNextWeek}
+              disabled={!canGoNext}
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
+
+          {isLoadingSlots ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500">カレンダーを確認中...</p>
+            </div>
+          ) : currentWeekDates.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500">この週には予約可能な日がありません</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr>
+                    <th className="border border-gray-200 bg-gray-50 p-2 text-xs font-medium text-gray-500 w-20">
+                      時間
+                    </th>
+                    {currentWeekDates.map((date, idx) => (
+                      <th key={idx} className="border border-gray-200 bg-gray-50 p-2 text-sm font-medium text-gray-900">
+                        <div>
+                          {date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {allTimeSlots.map((timeSlot) => {
+                    const [startTime, endTime] = timeSlot.split('-')
+                    
+                    return (
+                      <tr key={timeSlot}>
+                        <td className="border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
+                          {startTime.slice(0, 5)}
+                        </td>
+                        {currentWeekDates.map((date, idx) => {
+                          const dateStr = date.toISOString().split('T')[0]
+                          const slots = slotsByDateAndTime[dateStr]?.[timeSlot] || []
+                          const slot = slots[0]
+                          const isSelected = selectedSlot?.id === slot?.id
 
                           return (
-                            <button
-                              key={slot.id}
-                              onClick={() => handleSlotSelect(slot)}
-                              className={`
-                                py-2 px-3 rounded-md text-sm font-medium transition-colors
-                                ${selected
-                                  ? 'bg-blue-600 text-white'
-                                  : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                                }
-                              `}
-                            >
-                              {slot.start_time.slice(0, 5)}
-                            </button>
+                            <td key={idx} className="border border-gray-200 p-1">
+                              {slot ? (
+                                <button
+                                  onClick={() => handleSlotSelect(slot)}
+                                  className={`w-full h-16 rounded text-xs font-medium transition-colors border ${
+                                    isSelected
+                                      ? 'bg-blue-600 text-white border-blue-600'
+                                      : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-300'
+                                  }`}
+                                >
+                                  {startTime.slice(0, 5)} - {endTime.slice(0, 5)}
+                                </button>
+                              ) : (
+                                <div className="w-full h-16 bg-gray-100"></div>
+                              )}
+                            </td>
                           )
                         })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
-
-          <div className="lg:col-span-1">
-            <div className="bg-white shadow rounded-lg p-6 sticky top-8">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">
-                予約情報
-              </h2>
-
-              {selectedSlot ? (
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="bg-blue-50 p-3 rounded-md">
-                    <p className="text-sm font-medium text-blue-900">
-                      選択した時間
-                    </p>
-                    <p className="text-sm text-blue-700 mt-1">
-                      {new Date(selectedSlot.date).toLocaleDateString('ja-JP')}
-                    </p>
-                    <p className="text-sm text-blue-700">
-                      {selectedSlot.start_time.slice(0, 5)} - {selectedSlot.end_time.slice(0, 5)}
-                    </p>
-                  </div>
-
-                  {isOneTimeMode && (
-                    <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
-                      <p className="text-xs text-yellow-800 font-medium">
-                        ⚠️ ワンタイムリンク
-                      </p>
-                      <p className="text-xs text-yellow-700 mt-1">
-                        予約完了後、このリンクは無効化されます
-                      </p>
-                    </div>
-                  )}
-
-                  {/* ⭐ 게스트 프리셋 알림 */}
-                  {isPrefilledGuest && (
-                    <div className="bg-green-50 p-3 rounded-md border border-green-200">
-                      <p className="text-xs text-green-800 font-medium">
-                        ✅ 専用リンク
-                      </p>
-                      <p className="text-xs text-green-700 mt-1">
-                        情報が自動入力されています
-                      </p>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      お名前 *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={guestInfo.name}
-                      onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
-                      disabled={!!guestUser || isPrefilledGuest}
-                      className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 ${
-                        (guestUser || isPrefilledGuest) ? 'bg-gray-100' : ''
-                      }`}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      メールアドレス *
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={guestInfo.email}
-                      onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
-                      disabled={!!guestUser || isPrefilledGuest}
-                      className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 ${
-                        (guestUser || isPrefilledGuest) ? 'bg-gray-100' : ''
-                      }`}
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md disabled:bg-gray-400"
-                  >
-                    {submitting ? '予約中...' : '予約を確定する'}
-                  </button>
-                </form>
-              ) : (
-                <p className="text-sm text-gray-500">
-                  予約可能な時間を選択してください
-                </p>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

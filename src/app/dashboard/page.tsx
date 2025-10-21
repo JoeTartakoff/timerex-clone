@@ -268,17 +268,17 @@ export default function DashboardPage() {
     navigator.clipboard.writeText(url)
     
     if (isInterviewMode && quickGuestInfo.name && quickGuestInfo.email) {
-      alert(`${quickGuestInfo.name}様専用面接リンクをコピーしました！\nゲストが自由に候補時間を提案できます。`)
+      alert(`${quickGuestInfo.name}様専用候補日受取リンクをコピーしました！\nゲストが自由に候補時間を提案できます。`)
     } else if (isInterviewMode) {
-      alert('候補日受取モードのリンクをコピーしました！\nゲストが自由に候補時間を提案できます。')
+      alert('候補日受取リンクをコピーしました！\nゲストが自由に候補時間を提案できます。')
     } else if (isCandidateMode && quickGuestInfo.name && quickGuestInfo.email) {
-      alert(`${quickGuestInfo.name}様専用候補リンクをコピーしました！\nゲストは複数の候補から選択できます。`)
+      alert(`${quickGuestInfo.name}様専用候補時間提示リンクをコピーしました！\nゲストは複数の候補から選択できます。`)
     } else if (isCandidateMode) {
-      alert('候補時間モードのリンクをコピーしました！\nゲストは複数の候補から選択できます。')
+      alert('候補時間提示リンクをコピーしました！\nゲストは複数の候補から選択できます。')
     } else if (quickGuestInfo.name && quickGuestInfo.email) {
-      alert(`${quickGuestInfo.name}様専用リンクをコピーしました！\n何度でも予約可能なリンクです。`)
+      alert(`${quickGuestInfo.name}様専用通常予約リンクをコピーしました！\n何度でも予約可能なリンクです。`)
     } else {
-      alert('複数回予約可能リンクをコピーしました！\n何度でも予約可能なリンクです。')
+      alert('通常予約リンクをコピーしました！\n何度でも予約可能なリンクです。')
     }
   }
 
@@ -701,12 +701,12 @@ export default function DashboardPage() {
                           </h3>
                           {schedule.is_candidate_mode && (
                             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                              📋候補日提示モード
+                              📋 候補時間を提示
                             </span>
                           )}
                           {schedule.is_interview_mode && (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                              🎤 候補日受取モード
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                              🎤 候補日を受取
                             </span>
                           )}
                         </div>
@@ -740,13 +740,13 @@ export default function DashboardPage() {
                         </div>
 
                         {(schedule.is_candidate_mode || schedule.is_interview_mode) && guestResponsesMap[schedule.id] && guestResponsesMap[schedule.id].length > 0 && (
-                          <div className={`mt-3 p-3 rounded-md border ${schedule.is_interview_mode ? 'bg-blue-50 border-blue-200' : 'bg-purple-50 border-purple-200'}`}>
-                            <p className={`text-sm font-medium mb-2 ${schedule.is_interview_mode ? 'text-blue-800' : 'text-purple-800'}`}>
+                          <div className={`mt-3 p-3 rounded-md border ${schedule.is_interview_mode ? 'bg-orange-50 border-orange-200' : 'bg-purple-50 border-purple-200'}`}>
+                            <p className={`text-sm font-medium mb-2 ${schedule.is_interview_mode ? 'text-orange-800' : 'text-purple-800'}`}>
                               📬 ゲスト応答 ({guestResponsesMap[schedule.id].length}件)
                             </p>
                             <div className="space-y-2">
                               {guestResponsesMap[schedule.id].map((response) => (
-                                <div key={response.id} className={`bg-white p-3 rounded border ${schedule.is_interview_mode ? 'border-blue-200' : 'border-purple-200'}`}>
+                                <div key={response.id} className={`bg-white p-3 rounded border ${schedule.is_interview_mode ? 'border-orange-200' : 'border-purple-200'}`}>
                                   <div className="flex items-start justify-between mb-2">
                                     <div>
                                       <p className="text-sm font-medium text-gray-900">{response.guest_name}</p>
@@ -773,12 +773,12 @@ export default function DashboardPage() {
                                           <button
                                             key={idx}
                                             onClick={() => confirmGuestResponse(response.id, slot, schedule.id)}
-                                            className={`text-left p-2 rounded border text-xs ${schedule.is_interview_mode ? 'bg-blue-50 hover:bg-blue-100 border-blue-200' : 'bg-purple-50 hover:bg-purple-100 border-purple-200'}`}
+                                            className={`text-left p-2 rounded border text-xs ${schedule.is_interview_mode ? 'bg-orange-50 hover:bg-orange-100 border-orange-200' : 'bg-purple-50 hover:bg-purple-100 border-purple-200'}`}
                                           >
-                                            <div className={`font-medium ${schedule.is_interview_mode ? 'text-blue-900' : 'text-purple-900'}`}>
+                                            <div className={`font-medium ${schedule.is_interview_mode ? 'text-orange-900' : 'text-purple-900'}`}>
                                               {new Date(slot.date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
                                             </div>
-                                            <div className={schedule.is_interview_mode ? 'text-blue-700' : 'text-purple-700'}>
+                                            <div className={schedule.is_interview_mode ? 'text-orange-700' : 'text-purple-700'}>
                                               {slot.startTime.slice(0, 5)} - {slot.endTime.slice(0, 5)}
                                             </div>
                                           </button>
@@ -808,7 +808,7 @@ export default function DashboardPage() {
                                     onClick={() => copyPersonalizedLink(schedule.share_link, guest.custom_token, guest.guest_name)}
                                     className="ml-2 px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 whitespace-nowrap"
                                   >
-                                    専用リンクコピー
+                                    専用リンクをコピー
                                   </button>
                                 </div>
                               ))}
@@ -829,20 +829,20 @@ export default function DashboardPage() {
                             onClick={() => copyOneTimeLink(schedule.share_link)}
                             className="px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
                           >
-                            ワンタイムリンクコピー
+                            ワンタイムリンクをコピー
                           </button>
                         )}
                         <button
                           onClick={() => copyFixedLink(schedule.share_link, schedule.is_candidate_mode, schedule.is_interview_mode)}
                           className={`px-3 py-2 border rounded-md text-sm font-medium whitespace-nowrap ${
                             schedule.is_interview_mode
-                              ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                              ? 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100'
                               : schedule.is_candidate_mode
                               ? 'border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100'
                               : 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
                           }`}
                         >
-                          {schedule.is_interview_mode ? '面接リンクコピー' : schedule.is_candidate_mode ? '候補リンクコピー' : '複数回予約可能リンクコピー'}
+                          {schedule.is_interview_mode ? '候補日受取リンクをコピー' : schedule.is_candidate_mode ? '候補時間提示リンクをコピー' : '通常予約リンクをコピー'}
                         </button>
                         <button
                           onClick={() => deleteSchedule(schedule.id)}
