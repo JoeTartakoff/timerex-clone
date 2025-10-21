@@ -109,9 +109,9 @@ export default function InterviewPage() {
 
       setSchedule(data)
 
-      // ⭐ 스케줄 기간의 첫 주로 초기화
-      const startDate = new Date(data.date_range_start)
-      setCurrentWeekStart(startDate)
+      // ⭐ 개선: 항상 오늘이 포함된 주로 초기화
+      const today = new Date()
+      setCurrentWeekStart(today)
 
       generateTimeSlots(data)
     } catch (error) {
@@ -243,6 +243,11 @@ export default function InterviewPage() {
     }
   }
 
+  // ⭐ 오늘로 이동
+  const goToToday = () => {
+    setCurrentWeekStart(new Date())
+  }
+
   const canGoPrev = schedule ? isWeekInRange(
     new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000),
     schedule.date_range_start,
@@ -348,11 +353,11 @@ export default function InterviewPage() {
                 <span>📅 {schedule.date_range_start} ～ {schedule.date_range_end}</span>
                 <span>⏱️ {schedule.time_slot_duration}分</span>
               </div>
-<div className="mt-4">
-  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-    🎤 候補日を受取
-  </span>
-</div>
+              <div className="mt-4">
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                  🎤 候補日を受取
+                </span>
+              </div>
             </div>
           </div>
 
@@ -376,23 +381,23 @@ export default function InterviewPage() {
             予約情報
           </h2>
 
-{selectedSlots.length > 0 ? (
-  <form onSubmit={handleSubmit} className="space-y-4">
-    <div className="bg-orange-50 p-4 rounded-md mb-4">
-      <p className="text-sm font-medium text-orange-900">
-        選択した時間: {selectedSlots.length}個
-      </p>
-      <div className="mt-2 space-y-1">
-        {selectedSlots.slice(0, 3).map((slot, idx) => (
-          <p key={idx} className="text-xs text-orange-700">
+          {selectedSlots.length > 0 ? (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="bg-orange-50 p-4 rounded-md mb-4">
+                <p className="text-sm font-medium text-orange-900">
+                  選択した時間: {selectedSlots.length}個
+                </p>
+                <div className="mt-2 space-y-1">
+                  {selectedSlots.slice(0, 3).map((slot, idx) => (
+                    <p key={idx} className="text-xs text-orange-700">
                       {new Date(slot.date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} {slot.startTime.slice(0, 5)} - {slot.endTime.slice(0, 5)}
                     </p>
                   ))}
-{selectedSlots.length > 3 && (
-  <p className="text-xs text-orange-600">
-    他 {selectedSlots.length - 3}個
-  </p>
-)}
+                  {selectedSlots.length > 3 && (
+                    <p className="text-xs text-orange-600">
+                      他 {selectedSlots.length - 3}個
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -422,13 +427,13 @@ export default function InterviewPage() {
                 />
               </div>
 
-<button
-  type="submit"
-  disabled={submitting}
-  className="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium py-3 px-4 rounded-md disabled:bg-gray-400"
->
-  {submitting ? '送信中...' : '候補時間を送信'}
-</button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium py-3 px-4 rounded-md disabled:bg-gray-400"
+              >
+                {submitting ? '送信中...' : '候補時間を送信'}
+              </button>
             </form>
           ) : (
             <div className="text-center py-8">
@@ -450,9 +455,18 @@ export default function InterviewPage() {
               ← Prev
             </button>
             
-            <h2 className="text-lg font-medium text-gray-900">
-              {currentWeekStart.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
-            </h2>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={goToToday}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md text-sm font-medium transition-colors"
+              >
+                今日
+              </button>
+              
+              <h2 className="text-lg font-medium text-gray-900">
+                {currentWeekStart.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
+              </h2>
+            </div>
             
             <button
               onClick={goToNextWeek}
@@ -475,16 +489,24 @@ export default function InterviewPage() {
                     <th className="border border-gray-200 bg-gray-50 p-2 text-xs font-medium text-gray-500 w-20">
                       時間
                     </th>
-                    {currentWeekDates.map((date, idx) => (
-                      <th key={idx} className="border border-gray-200 bg-gray-50 p-2 text-sm font-medium text-gray-900">
-                        <div>
-                          {date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
-                        </div>
-                      </th>
-                    ))}
+                    {currentWeekDates.map((date, idx) => {
+                      // ⭐ 오늘 날짜 확인
+                      const today = new Date()
+                      const isToday = date.toISOString().split('T')[0] === today.toISOString().split('T')[0]
+                      
+                      return (
+                        <th key={idx} className="border border-gray-200 bg-gray-50 p-2 text-sm font-medium text-gray-900">
+                          <div>
+                            {date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
+                          </div>
+                          <div className="text-xs text-gray-500 flex items-center justify-center gap-1">
+                            {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
+                            {/* ⭐ 오늘이면 빨간 점 표시 */}
+                            {isToday && <span className="text-red-500 text-lg leading-none">●</span>}
+                          </div>
+                        </th>
+                      )
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -507,14 +529,14 @@ export default function InterviewPage() {
                           return (
                             <td key={idx} className="border border-gray-200 p-1">
                               {slot ? (
-<button
-  onClick={() => toggleSlot(slot)}
-  className={`w-full h-16 rounded text-xs font-medium transition-colors border ${
-    isSelected
-      ? 'bg-orange-600 text-white border-orange-600'
-      : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-300'
-  }`}
->
+                                <button
+                                  onClick={() => toggleSlot(slot)}
+                                  className={`w-full h-16 rounded text-xs font-medium transition-colors border ${
+                                    isSelected
+                                      ? 'bg-orange-600 text-white border-orange-600'
+                                      : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-300'
+                                  }`}
+                                >
                                   {startTime.slice(0, 5)} - {endTime.slice(0, 5)}
                                 </button>
                               ) : (

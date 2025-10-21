@@ -118,9 +118,9 @@ export default function BookingPage() {
 
       setSchedule(scheduleData)
 
-      // ⭐ 스케줄 기간의 첫 주로 초기화
-      const startDate = new Date(scheduleData.date_range_start)
-      setCurrentWeekStart(startDate)
+      // ⭐ 개선: 항상 오늘이 포함된 주로 초기화
+      const today = new Date()
+      setCurrentWeekStart(today)
 
       // Google Calendar API로 실시간 슬롯 가져오기
       try {
@@ -468,6 +468,11 @@ export default function BookingPage() {
     }
   }
 
+  // ⭐ 오늘로 이동
+  const goToToday = () => {
+    setCurrentWeekStart(new Date())
+  }
+
   // ⭐ 이전/다음 주 버튼 활성화 여부
   const canGoPrev = schedule ? isWeekInRange(
     new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000),
@@ -567,18 +572,18 @@ export default function BookingPage() {
               </div>
             </div>
             
-<div className="ml-4 flex flex-col gap-2">
-  {isOneTimeMode && (
-    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-      🔒 ワンタイムリンク
-    </span>
-  )}
-  {isPrefilledGuest && (
-    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-      ✅ 専用リンク
-    </span>
-  )}
-</div>
+            <div className="ml-4 flex flex-col gap-2">
+              {isOneTimeMode && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                  🔒 ワンタイムリンク
+                </span>
+              )}
+              {isPrefilledGuest && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  ✅ 専用リンク
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Google 로그인 섹션 */}
@@ -714,7 +719,7 @@ export default function BookingPage() {
 
         {/* ⭐ 3. 캘린더 박스 */}
         <div className="bg-white shadow rounded-lg p-6">
-          {/* 월 표시 + 이전/다음 버튼 */}
+          {/* ⭐ 월 표시 + 오늘 버튼 + 이전/다음 버튼 */}
           <div className="flex items-center justify-between mb-6">
             <button
               onClick={goToPrevWeek}
@@ -724,9 +729,18 @@ export default function BookingPage() {
               ← Prev
             </button>
             
-            <h2 className="text-lg font-medium text-gray-900">
-              {currentWeekStart.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
-            </h2>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={goToToday}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors"
+              >
+                今日
+              </button>
+              
+              <h2 className="text-lg font-medium text-gray-900">
+                {currentWeekStart.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
+              </h2>
+            </div>
             
             <button
               onClick={goToNextWeek}
@@ -753,16 +767,24 @@ export default function BookingPage() {
                     <th className="border border-gray-200 bg-gray-50 p-2 text-xs font-medium text-gray-500 w-20">
                       時間
                     </th>
-                    {currentWeekDates.map((date, idx) => (
-                      <th key={idx} className="border border-gray-200 bg-gray-50 p-2 text-sm font-medium text-gray-900">
-                        <div>
-                          {date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
-                        </div>
-                      </th>
-                    ))}
+                    {currentWeekDates.map((date, idx) => {
+                      // ⭐ 오늘 날짜 확인
+                      const today = new Date()
+                      const isToday = date.toISOString().split('T')[0] === today.toISOString().split('T')[0]
+                      
+                      return (
+                        <th key={idx} className="border border-gray-200 bg-gray-50 p-2 text-sm font-medium text-gray-900">
+                          <div>
+                            {date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
+                          </div>
+                          <div className="text-xs text-gray-500 flex items-center justify-center gap-1">
+                            {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
+                            {/* ⭐ 오늘이면 빨간 점 표시 */}
+                            {isToday && <span className="text-red-500 text-lg leading-none">●</span>}
+                          </div>
+                        </th>
+                      )
+                    })}
                   </tr>
                 </thead>
                 <tbody>
