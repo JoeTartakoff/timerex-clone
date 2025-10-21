@@ -75,28 +75,28 @@ async function fetchEventsFromCalendar(
       
       console.log(`📄 Calendar ${calendarId} - Page ${pageCount}: ${pageEvents.length} events`)
       
-// ⭐ 하루 종일 이벤트 필터링 추가
-const formattedEvents = pageEvents
-  .filter((item: any) => {
-    // dateTime이 있으면 일반 이벤트 → 사용
-    if (item.start.dateTime) {
-      return true
-    }
-    
-    // date만 있으면 하루 종일 이벤트 → 무시
-    if (item.start.date && !item.start.dateTime) {
-      console.log(`🚫 Skipping all-day event: "${item.summary}" on ${item.start.date}`)
-      return false
-    }
-    
-    return true
-  })
-  .map((item: any) => ({
-    id: item.id,
-    summary: item.summary || '予定',
-    start: item.start.dateTime,  // ⭐ 이제 항상 dateTime
-    end: item.end.dateTime,
-  }))
+      // ⭐ 하루 종일 이벤트 필터링 추가
+      const formattedEvents = pageEvents
+        .filter((item: any) => {
+          // dateTime이 있으면 일반 이벤트 → 사용
+          if (item.start.dateTime) {
+            return true
+          }
+          
+          // date만 있으면 하루 종일 이벤트 → 무시
+          if (item.start.date && !item.start.dateTime) {
+            console.log(`🚫 Skipping all-day event: "${item.summary}" on ${item.start.date}`)
+            return false
+          }
+          
+          return true
+        })
+        .map((item: any) => ({
+          id: item.id,
+          summary: item.summary || '予定',
+          start: item.start.dateTime,  // ⭐ 이제 항상 dateTime
+          end: item.end.dateTime,
+        }))
       
       allEvents.push(...formattedEvents)
       pageToken = data.nextPageToken
@@ -299,7 +299,7 @@ function generateTimeSlots(
       })
     }
 
-    current += duration
+    current += 30  // ✅ 수정! 항상 30분씩 점프!
   }
 
   return slots

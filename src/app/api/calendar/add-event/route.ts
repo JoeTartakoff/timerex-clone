@@ -412,7 +412,8 @@ export async function POST(request: Request) {
     const startDateTime = `${bookingDate}T${startHour.padStart(2, '0')}:${startMin.padStart(2, '0')}:00`
     const endDateTime = `${bookingDate}T${endHour.padStart(2, '0')}:${endMin.padStart(2, '0')}:00`
 
-    const baseEventData = {
+    // ⭐ baseEventData → hostEventData로 변경
+    const hostEventData = {
       summary: `${schedule.title} - ${guestName}`,
       description: `予約者: ${guestName}\nメール: ${guestEmail}`,
       start: {
@@ -423,9 +424,7 @@ export async function POST(request: Request) {
         dateTime: endDateTime,
         timeZone: 'Asia/Tokyo',
       },
-      attendees: [
-        { email: guestEmail },
-      ],
+      attendees: guestUserId ? [] : [{ email: guestEmail }],  // ⭐ 조건부 변경
       reminders: {
         useDefault: false,
         overrides: [
@@ -474,7 +473,7 @@ export async function POST(request: Request) {
         schedule.team_id,
         assignedUserId,
         assignedUserEmail,
-        baseEventData,
+        hostEventData,  // ⭐ 변경
         schedule.title
       )
 
@@ -529,7 +528,7 @@ export async function POST(request: Request) {
       }
 
       console.log('📅 Adding event to host calendar...')
-      const hostEvent = await addCalendarEvent(hostAccessToken, baseEventData)
+      const hostEvent = await addCalendarEvent(hostAccessToken, hostEventData)  // ⭐ 변경
       hostEventIds = [(hostEvent as { id: string }).id]
       console.log('✅ Host event created:', hostEventIds[0])
     }
@@ -568,12 +567,28 @@ export async function POST(request: Request) {
           }
         }
 
+        // ⭐ 게스트 전용 이벤트 데이터 (독립적)
         const guestEventData = {
-          ...baseEventData,
           summary: `${schedule.title}`,
           description: schedule.team_id 
-            ? `チームとの予定\n担当者: ${assignedUserEmail}\n場所: ${schedule.title}`
-            : `ホストとの予定\n場所: ${schedule.title}`,
+            ? `チームとの予定\n担当者: ${assignedUserEmail}`
+            : `ホストとの予定`,
+          start: {
+            dateTime: startDateTime,
+            timeZone: 'Asia/Tokyo',
+          },
+          end: {
+            dateTime: endDateTime,
+            timeZone: 'Asia/Tokyo',
+          },
+          attendees: [],  // ⭐ attendees 없음!
+          reminders: {
+            useDefault: false,
+            overrides: [
+              { method: 'email', minutes: 24 * 60 },
+              { method: 'popup', minutes: 30 },
+            ],
+          },
         }
 
         try {
