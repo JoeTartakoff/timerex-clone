@@ -11,6 +11,7 @@ interface Schedule {
   description: string
   date_range_start: string
   date_range_end: string
+  time_slot_duration: number
   candidate_slots: Array<{
     date: string
     startTime: string
@@ -18,20 +19,21 @@ interface Schedule {
   }>
 }
 
-// ⭐ 주간 날짜 계산 함수
-function getWeekDates(baseDate: Date): Date[] {
+interface TimeBlock {
+  id: string
+  date: string
+  startTime: string
+  endTime: string
+}
+
+// ⭐ 3일 날짜 계산 (오늘/내일/모레)
+function getThreeDayDates(center: Date): Date[] {
   const dates: Date[] = []
-  const day = baseDate.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  const monday = new Date(baseDate)
-  monday.setDate(baseDate.getDate() + diff)
-  
-  for (let i = 0; i < 6; i++) {
-    const date = new Date(monday)
-    date.setDate(monday.getDate() + i)
+  for (let i = 0; i <= 2; i++) {
+    const date = new Date(center)
+    date.setDate(center.getDate() + i)
     dates.push(date)
   }
-  
   return dates
 }
 
@@ -40,9 +42,27 @@ function isDateInRange(date: Date, start: string, end: string): boolean {
   return dateStr >= start && dateStr <= end
 }
 
-function isWeekInRange(weekStart: Date, rangeStart: string, rangeEnd: string): boolean {
-  const weekDates = getWeekDates(weekStart)
-  return weekDates.some(date => isDateInRange(date, rangeStart, rangeEnd))
+// ⭐ 시간 계산 유틸리티
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+function minutesToTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
+}
+
+function snapToHalfHour(minutes: number): number {
+  return Math.round(minutes / 30) * 30
+}
+
+function timeToPixelPosition(time: string): number {
+  const minutes = timeToMinutes(time)
+  const baseMinutes = 9 * 60
+  const relativeMinutes = minutes - baseMinutes
+  return (relativeMinutes / 60) * 96
 }
 
 export default function CandidatePage() {
@@ -51,11 +71,7 @@ export default function CandidatePage() {
 
   const [loading, setLoading] = useState(true)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
-  const [selectedSlots, setSelectedSlots] = useState<Array<{
-    date: string
-    startTime: string
-    endTime: string
-  }>>([])
+  const [selectedBlocks, setSelectedBlocks] = useState<TimeBlock[]>([])
   const [guestInfo, setGuestInfo] = useState({
     name: '',
     email: '',
@@ -63,15 +79,15 @@ export default function CandidatePage() {
   const [submitting, setSubmitting] = useState(false)
   const [responseLink, setResponseLink] = useState<string | null>(null)
 
-  // ⭐ 주간 뷰 상태
-  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(new Date())
-  const [weekDates, setWeekDates] = useState<Date[]>([])
+  // ⭐ 3일 뷰를 위한 시작 날짜
+  const [startDate, setStartDate] = useState<Date>(new Date())
+
+  // ⭐ 드래그 상태
+  const [draggingBlockIndex, setDraggingBlockIndex] = useState<number | null>(null)
+  const [dragStartY, setDragStartY] = useState(0)
+  const [dragInitialTop, setDragInitialTop] = useState(0)
 
   const initRef = useRef(false)
-
-  useEffect(() => {
-    setWeekDates(getWeekDates(currentWeekStart))
-  }, [currentWeekStart])
 
   useEffect(() => {
     if (initRef.current) return
@@ -104,9 +120,8 @@ export default function CandidatePage() {
 
       setSchedule(data)
 
-      // ⭐ 개선: 항상 오늘이 포함된 주로 초기화
       const today = new Date()
-      setCurrentWeekStart(today)
+      setStartDate(today)
     } catch (error) {
       console.error('Error loading schedule:', error)
       alert('スケジュールの読み込みに失敗しました')
@@ -115,28 +130,158 @@ export default function CandidatePage() {
     }
   }
 
-  const toggleSlot = (slot: { date: string, startTime: string, endTime: string }) => {
-    const exists = selectedSlots.some(
-      s => s.date === slot.date && s.startTime === slot.startTime
+  // ⭐ 특정 30분 슬롯이 후보 시간인지 확인
+  const isHalfHourInCandidates = (date: string, startTime: string): boolean => {
+    if (!schedule) return false
+    
+    const startMinutes = timeToMinutes(startTime)
+    const endMinutes = startMinutes + 30
+    
+    return schedule.candidate_slots.some(slot => 
+      slot.date === date &&
+      timeToMinutes(slot.startTime) <= startMinutes && 
+      timeToMinutes(slot.endTime) >= endMinutes
     )
+  }
 
-    if (exists) {
-      setSelectedSlots(selectedSlots.filter(
-        s => !(s.date === slot.date && s.startTime === slot.startTime)
-      ))
-    } else {
-      setSelectedSlots([...selectedSlots, slot])
+  // ⭐ 해당 시간대가 후보 시간에 포함되는지 확인
+  const isTimeSlotInCandidates = (date: string, startTime: string, endTime: string): boolean => {
+    if (!schedule) return false
+    
+    const startMinutes = timeToMinutes(startTime)
+    const endMinutes = timeToMinutes(endTime)
+    
+    for (let time = startMinutes; time < endMinutes; time += 30) {
+      const currentTime = minutesToTime(time)
+      if (!isHalfHourInCandidates(date, currentTime)) {
+        return false
+      }
     }
+    
+    return true
+  }
+
+  // ⭐ 셀 클릭 - 박스 생성
+  const handleCellClick = (date: string, hour: number, e: React.MouseEvent<HTMLDivElement>) => {
+    if (!schedule || draggingBlockIndex !== null) return
+    
+    const rect = e.currentTarget.getBoundingClientRect()
+    const clickY = e.clientY - rect.top
+    const cellHeight = rect.height
+    
+    const minute = clickY < cellHeight / 2 ? 0 : 30
+    
+    const startMinutes = hour * 60 + minute
+    const startTime = minutesToTime(startMinutes)
+    const endMinutes = startMinutes + schedule.time_slot_duration
+    const endTime = minutesToTime(endMinutes)
+    
+    if (!isTimeSlotInCandidates(date, startTime, endTime)) {
+      alert('この時間帯は選択できません')
+      return
+    }
+    
+    // 이미 선택된 블록인지 확인
+    const existingIndex = selectedBlocks.findIndex(
+      b => b.date === date && b.startTime === startTime
+    )
+    
+    if (existingIndex >= 0) {
+      // 이미 있으면 제거
+      setSelectedBlocks(selectedBlocks.filter((_, i) => i !== existingIndex))
+    } else {
+      // 없으면 추가
+      const newBlock: TimeBlock = {
+        id: nanoid(10),
+        date,
+        startTime,
+        endTime
+      }
+      setSelectedBlocks([...selectedBlocks, newBlock])
+    }
+  }
+
+  // ⭐ 박스 드래그 시작
+  const handleBlockMouseDown = (e: React.MouseEvent, blockIndex: number) => {
+    e.stopPropagation()
+    e.preventDefault()
+    
+    setDraggingBlockIndex(blockIndex)
+    setDragStartY(e.clientY)
+    setDragInitialTop(timeToMinutes(selectedBlocks[blockIndex].startTime))
+  }
+
+  // ⭐ 박스 드래그 중
+  const handleMouseMove = (e: MouseEvent) => {
+    if (draggingBlockIndex === null || !schedule) return
+    
+    const block = selectedBlocks[draggingBlockIndex]
+    
+    const deltaY = e.clientY - dragStartY
+    const deltaMinutes = Math.round((deltaY / 96) * 60)
+    
+    let newStartMinutes = dragInitialTop + deltaMinutes
+    newStartMinutes = snapToHalfHour(newStartMinutes)
+    
+    const minMinutes = 9 * 60
+    const maxMinutes = 18 * 60 - schedule.time_slot_duration
+    
+    if (newStartMinutes < minMinutes) newStartMinutes = minMinutes
+    if (newStartMinutes > maxMinutes) newStartMinutes = maxMinutes
+    
+    const newStartTime = minutesToTime(newStartMinutes)
+    const newEndMinutes = newStartMinutes + schedule.time_slot_duration
+    const newEndTime = minutesToTime(newEndMinutes)
+    
+    if (!isTimeSlotInCandidates(block.date, newStartTime, newEndTime)) {
+      return
+    }
+    
+    const newBlocks = [...selectedBlocks]
+    newBlocks[draggingBlockIndex] = {
+      ...block,
+      startTime: newStartTime,
+      endTime: newEndTime
+    }
+    setSelectedBlocks(newBlocks)
+  }
+
+  // ⭐ 박스 드래그 종료
+  const handleMouseUp = () => {
+    setDraggingBlockIndex(null)
+  }
+
+  useEffect(() => {
+    if (draggingBlockIndex !== null) {
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove)
+        window.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [draggingBlockIndex, selectedBlocks, schedule, dragStartY, dragInitialTop])
+
+  // ⭐ 박스 삭제
+  const removeBlock = (blockIndex: number) => {
+    setSelectedBlocks(selectedBlocks.filter((_, i) => i !== blockIndex))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!schedule || selectedSlots.length === 0) return
+    if (!schedule || selectedBlocks.length === 0) return
 
     setSubmitting(true)
 
     try {
       const shareToken = nanoid(10)
+
+      // ID 제거하고 저장
+      const slotsToSave = selectedBlocks.map(({ date, startTime, endTime }) => ({
+        date,
+        startTime,
+        endTime
+      }))
 
       const { error } = await supabase
         .from('guest_responses')
@@ -144,7 +289,7 @@ export default function CandidatePage() {
           schedule_id: schedule.id,
           guest_name: guestInfo.name,
           guest_email: guestInfo.email,
-          selected_slots: selectedSlots,
+          selected_slots: slotsToSave,
           share_token: shareToken,
           is_confirmed: false,
         })
@@ -170,41 +315,42 @@ export default function CandidatePage() {
     }
   }
 
-  const goToPrevWeek = () => {
+  // ⭐ 이전 3일로 이동
+  const goToPrev3Days = () => {
     if (!schedule) return
     
-    const prevWeek = new Date(currentWeekStart)
-    prevWeek.setDate(currentWeekStart.getDate() - 7)
+    const prevStart = new Date(startDate)
+    prevStart.setDate(startDate.getDate() - 3)
     
-    if (isWeekInRange(prevWeek, schedule.date_range_start, schedule.date_range_end)) {
-      setCurrentWeekStart(prevWeek)
+    if (isDateInRange(prevStart, schedule.date_range_start, schedule.date_range_end)) {
+      setStartDate(prevStart)
     }
   }
 
-  const goToNextWeek = () => {
+  // ⭐ 다음 3일로 이동
+  const goToNext3Days = () => {
     if (!schedule) return
     
-    const nextWeek = new Date(currentWeekStart)
-    nextWeek.setDate(currentWeekStart.getDate() + 7)
+    const nextStart = new Date(startDate)
+    nextStart.setDate(startDate.getDate() + 3)
     
-    if (isWeekInRange(nextWeek, schedule.date_range_start, schedule.date_range_end)) {
-      setCurrentWeekStart(nextWeek)
+    if (isDateInRange(nextStart, schedule.date_range_start, schedule.date_range_end)) {
+      setStartDate(nextStart)
     }
   }
 
-  // ⭐ 오늘로 이동
   const goToToday = () => {
-    setCurrentWeekStart(new Date())
+    setStartDate(new Date())
   }
 
-  const canGoPrev = schedule ? isWeekInRange(
-    new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000),
+  const canGoPrev = schedule ? isDateInRange(
+    new Date(startDate.getTime() - 3 * 24 * 60 * 60 * 1000),
     schedule.date_range_start,
     schedule.date_range_end
   ) : false
 
-  const canGoNext = schedule ? isWeekInRange(
-    new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000),
+  const canGoNext = schedule ? isDateInRange(
+    new Date(startDate.getTime() + 3 * 24 * 60 * 60 * 1000),
     schedule.date_range_start,
     schedule.date_range_end
   ) : false
@@ -260,35 +406,21 @@ export default function CandidatePage() {
     )
   }
 
-  // ⭐ 주간별 슬롯 그룹화
-  const slotsByDateAndTime = schedule.candidate_slots.reduce((acc, slot) => {
-    if (!acc[slot.date]) {
-      acc[slot.date] = {}
-    }
-    const timeKey = `${slot.startTime}-${slot.endTime}`
-    if (!acc[slot.date][timeKey]) {
-      acc[slot.date][timeKey] = []
-    }
-    acc[slot.date][timeKey].push(slot)
-    return acc
-  }, {} as Record<string, Record<string, typeof schedule.candidate_slots>>)
+  const hourSlots: number[] = []
+  for (let hour = 9; hour <= 17; hour++) {
+    hourSlots.push(hour)
+  }
 
-  // ⭐ 모든 시간대 추출
-  const allTimeSlots = Array.from(
-    new Set(
-      schedule.candidate_slots.map(slot => `${slot.startTime}-${slot.endTime}`)
-    )
-  ).sort()
-
-  // ⭐ 현재 주의 날짜만 필터링
-  const currentWeekDates = weekDates.filter(date => 
+  const displayDates = getThreeDayDates(startDate).filter(date => 
     isDateInRange(date, schedule.date_range_start, schedule.date_range_end)
   )
+
+  const blockHeightPx = schedule ? (schedule.time_slot_duration / 60) * 96 : 96
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* ⭐ 1. 헤더 박스 */}
+        {/* 헤더 박스 */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <div className="flex items-start justify-between">
             <div className="flex-1">
@@ -307,29 +439,33 @@ export default function CandidatePage() {
           </div>
         </div>
 
-        {/* ⭐ 2. 예약 정보 박스 */}
+        {/* 예약 정보 박스 */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">
             予約情報
           </h2>
 
-          {selectedSlots.length > 0 ? (
+          {selectedBlocks.length > 0 ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="bg-purple-50 p-4 rounded-md mb-4">
-                <p className="text-sm font-medium text-purple-900">
-                  選択した時間: {selectedSlots.length}個
+                <p className="text-sm font-medium text-purple-900 mb-2">
+                  選択した時間: {selectedBlocks.length}個
                 </p>
-                <div className="mt-2 space-y-1">
-                  {selectedSlots.slice(0, 3).map((slot, idx) => (
-                    <p key={idx} className="text-xs text-purple-700">
-                      {new Date(slot.date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} {slot.startTime.slice(0, 5)} - {slot.endTime.slice(0, 5)}
-                    </p>
+                <div className="mt-2 space-y-2">
+                  {selectedBlocks.map((block, idx) => (
+                    <div key={block.id} className="flex items-center justify-between bg-white p-2 rounded border border-purple-200">
+                      <p className="text-xs text-purple-700">
+                        {new Date(block.date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} {block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => removeBlock(idx)}
+                        className="w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
+                      >
+                        ×
+                      </button>
+                    </div>
                   ))}
-                  {selectedSlots.length > 3 && (
-                    <p className="text-xs text-purple-600">
-                      他 {selectedSlots.length - 3}個
-                    </p>
-                  )}
                 </div>
               </div>
 
@@ -370,21 +506,27 @@ export default function CandidatePage() {
           ) : (
             <div className="text-center py-8">
               <p className="text-gray-500">
-                下のカレンダーから希望する時間を選択してください（複数選択可）
+                下のカレンダーで時間をクリックして選択してください（複数選択可）
+              </p>
+              <p className="text-sm text-gray-400 mt-2">
+                予約時間: {schedule.time_slot_duration}分
+              </p>
+              <p className="text-sm text-gray-400">
+                選択後、ドラッグで時間を調整できます
               </p>
             </div>
           )}
         </div>
 
-        {/* ⭐ 3. 주간 캘린더 */}
+        {/* 캘린더 박스 */}
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <button
-              onClick={goToPrevWeek}
+              onClick={goToPrev3Days}
               disabled={!canGoPrev}
               className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              ← Prev
+              ← 前の3日
             </button>
             
             <div className="flex items-center gap-3">
@@ -396,33 +538,32 @@ export default function CandidatePage() {
               </button>
               
               <h2 className="text-lg font-medium text-gray-900">
-                {currentWeekStart.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
+                {startDate.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
               </h2>
             </div>
             
             <button
-              onClick={goToNextWeek}
+              onClick={goToNext3Days}
               disabled={!canGoNext}
               className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Next →
+              次の3日 →
             </button>
           </div>
 
-          {currentWeekDates.length === 0 ? (
+          {displayDates.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-gray-500">この週には予約可能な日がありません</p>
+              <p className="text-gray-500">この期間には予約可能な日がありません</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
+              <table className="w-full border-collapse select-none">
                 <thead>
                   <tr>
                     <th className="border border-gray-200 bg-gray-50 p-2 text-xs font-medium text-gray-500 w-20">
                       時間
                     </th>
-                    {currentWeekDates.map((date, idx) => {
-                      // ⭐ 오늘 날짜 확인
+                    {displayDates.map((date, idx) => {
                       const today = new Date()
                       const isToday = date.toISOString().split('T')[0] === today.toISOString().split('T')[0]
                       
@@ -433,7 +574,6 @@ export default function CandidatePage() {
                           </div>
                           <div className="text-xs text-gray-500 flex items-center justify-center gap-1">
                             {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
-                            {/* ⭐ 오늘이면 빨간 점 표시 */}
                             {isToday && <span className="text-red-500 text-lg leading-none">●</span>}
                           </div>
                         </th>
@@ -442,38 +582,86 @@ export default function CandidatePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {allTimeSlots.map((timeSlot) => {
-                    const [startTime, endTime] = timeSlot.split('-')
-                    
+                  {hourSlots.map((hour) => {
                     return (
-                      <tr key={timeSlot}>
+                      <tr key={hour}>
                         <td className="border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
-                          {startTime.slice(0, 5)}
+                          {String(hour).padStart(2, '0')}:00
                         </td>
-                        {currentWeekDates.map((date, idx) => {
+                        {displayDates.map((date, dateIdx) => {
                           const dateStr = date.toISOString().split('T')[0]
-                          const slots = slotsByDateAndTime[dateStr]?.[timeSlot] || []
-                          const slot = slots[0]
-                          const isSelected = slot && selectedSlots.some(
-                            s => s.date === slot.date && s.startTime === slot.startTime
-                          )
+                          
+                          const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
+                          const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
+                          const isFirstHalfAvailable = isHalfHourInCandidates(dateStr, firstHalfTime)
+                          const isSecondHalfAvailable = isHalfHourInCandidates(dateStr, secondHalfTime)
 
                           return (
-                            <td key={idx} className="border border-gray-200 p-1">
-                              {slot ? (
-                                <button
-                                  onClick={() => toggleSlot(slot)}
-                                  className={`w-full h-16 rounded text-xs font-medium transition-colors border ${
-                                    isSelected
-                                      ? 'bg-purple-600 text-white border-purple-600'
-                                      : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-300'
-                                  }`}
-                                >
-                                  {startTime.slice(0, 5)} - {endTime.slice(0, 5)}
-                                </button>
-                              ) : (
-                                <div className="w-full h-16 bg-gray-100"></div>
-                              )}
+                            <td 
+                              key={dateIdx} 
+                              className="border border-gray-200 p-0 relative"
+                              style={{ height: '96px' }}
+                              onClick={(e) => handleCellClick(dateStr, hour, e)}
+                            >
+                              <div 
+                                className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
+                                  isFirstHalfAvailable 
+                                    ? 'hover:bg-purple-50' 
+                                    : 'bg-gray-200 cursor-not-allowed'
+                                }`}
+                                style={{ height: '48px' }}
+                              />
+                              
+                              <div className="absolute left-0 right-0 border-t border-gray-300 pointer-events-none" style={{ top: '48px' }} />
+                              
+                              <div 
+                                className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
+                                  isSecondHalfAvailable 
+                                    ? 'hover:bg-purple-50' 
+                                    : 'bg-gray-200 cursor-not-allowed'
+                                }`}
+                                style={{ height: '48px' }}
+                              />
+                              
+                              {selectedBlocks.map((block, blockIdx) => {
+                                const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
+                                const isBlockStart = block.date === dateStr && blockStartHour === hour
+                                
+                                if (!isBlockStart) return null
+                                
+                                const blockTopPosition = timeToPixelPosition(block.startTime) - (blockStartHour - 9) * 96
+                                const isDraggingThis = draggingBlockIndex === blockIdx
+
+                                return (
+                                  <div
+                                    key={block.id}
+                                    className={`absolute left-1 right-1 bg-purple-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-10 ${
+                                      isDraggingThis ? 'cursor-grabbing' : 'cursor-move'
+                                    }`}
+                                    style={{
+                                      top: `${blockTopPosition}px`,
+                                      height: `${blockHeightPx}px`
+                                    }}
+                                    onMouseDown={(e) => handleBlockMouseDown(e, blockIdx)}
+                                  >
+                                    <div className="text-center relative w-full">
+                                      <div>{block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}</div>
+                                      <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
+                                      
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          removeBlock(blockIdx)
+                                        }}
+                                        className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  </div>
+                                )
+                              })}
                             </td>
                           )
                         })}

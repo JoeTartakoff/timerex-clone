@@ -32,36 +32,51 @@ interface User {
   }
 }
 
-// ⭐ 주간 날짜 계산 함수
-function getWeekDates(baseDate: Date): Date[] {
+interface TimeBlock {
+  date: string
+  startTime: string
+  endTime: string
+}
+
+// ⭐ 3일 날짜 계산 (오늘/내일/모레)
+function getThreeDayDates(center: Date): Date[] {
   const dates: Date[] = []
-  const day = baseDate.getDay() // 0(일) ~ 6(토)
-  
-  // 월요일(1)부터 시작하도록 조정
-  const diff = day === 0 ? -6 : 1 - day
-  const monday = new Date(baseDate)
-  monday.setDate(baseDate.getDate() + diff)
-  
-  // 월~토 (6일)
-  for (let i = 0; i < 6; i++) {
-    const date = new Date(monday)
-    date.setDate(monday.getDate() + i)
+  for (let i = 0; i <= 2; i++) {
+    const date = new Date(center)
+    date.setDate(center.getDate() + i)
     dates.push(date)
   }
-  
   return dates
 }
 
-// ⭐ 날짜가 범위 내에 있는지 확인
 function isDateInRange(date: Date, start: string, end: string): boolean {
   const dateStr = date.toISOString().split('T')[0]
   return dateStr >= start && dateStr <= end
 }
 
-// ⭐ 주의 시작일이 범위 내에 있는지 확인
-function isWeekInRange(weekStart: Date, rangeStart: string, rangeEnd: string): boolean {
-  const weekDates = getWeekDates(weekStart)
-  return weekDates.some(date => isDateInRange(date, rangeStart, rangeEnd))
+// ⭐ 시간 계산 유틸리티
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+function minutesToTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
+}
+
+// ⭐ 30분 단위로 스냅
+function snapToHalfHour(minutes: number): number {
+  return Math.round(minutes / 30) * 30
+}
+
+// ⭐ 시간을 픽셀 위치로 변환 (09:00 = 0px, 1시간 = 96px, 30분 = 48px)
+function timeToPixelPosition(time: string): number {
+  const minutes = timeToMinutes(time)
+  const baseMinutes = 9 * 60 // 09:00
+  const relativeMinutes = minutes - baseMinutes
+  return (relativeMinutes / 60) * 96 // 1시간당 96px
 }
 
 export default function BookingPage() {
@@ -71,7 +86,7 @@ export default function BookingPage() {
   const [loading, setLoading] = useState(true)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [availableSlots, setAvailableSlots] = useState<AvailabilitySlot[]>([])
-  const [selectedSlot, setSelectedSlot] = useState<AvailabilitySlot | null>(null)
+  const [selectedBlock, setSelectedBlock] = useState<TimeBlock | null>(null)
   const [guestInfo, setGuestInfo] = useState({
     name: '',
     email: '',
@@ -85,19 +100,17 @@ export default function BookingPage() {
   const [isPrefilledGuest, setIsPrefilledGuest] = useState(false)
   const [guestToken, setGuestToken] = useState<string | null>(null)
 
-  // ⭐ 주간 뷰 상태
-  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(new Date())
-  const [weekDates, setWeekDates] = useState<Date[]>([])
+  // ⭐ 3일 뷰를 위한 시작 날짜 (기본값: 오늘)
+  const [startDate, setStartDate] = useState<Date>(new Date())
+
+  // ⭐ 드래그 상태
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragStartY, setDragStartY] = useState(0)
+  const [dragInitialTop, setDragInitialTop] = useState(0)
 
   const initRef = useRef(false)
   const guestLoginProcessedRef = useRef(false)
 
-  // ⭐ 주간 날짜 업데이트
-  useEffect(() => {
-    setWeekDates(getWeekDates(currentWeekStart))
-  }, [currentWeekStart])
-
-  // 스케줄 데이터 로드
   const fetchScheduleData = async (guestUserId?: string) => {
     try {
       console.log('=== fetchScheduleData START ===')
@@ -118,11 +131,9 @@ export default function BookingPage() {
 
       setSchedule(scheduleData)
 
-      // ⭐ 개선: 항상 오늘이 포함된 주로 초기화
       const today = new Date()
-      setCurrentWeekStart(today)
+      setStartDate(today)
 
-      // Google Calendar API로 실시간 슬롯 가져오기
       try {
         console.log('📅 Fetching from Google Calendar API...')
         
@@ -346,13 +357,130 @@ export default function BookingPage() {
     window.location.reload()
   }
 
-  const handleSlotSelect = (slot: AvailabilitySlot) => {
-    setSelectedSlot(slot)
+  // ⭐ 특정 30분 슬롯이 예약 가능한지 확인
+  const isHalfHourAvailable = (date: string, startTime: string): boolean => {
+    const startMinutes = timeToMinutes(startTime)
+    const endMinutes = startMinutes + 30
+    
+    return availableSlots.some(slot => 
+      slot.date === date &&
+      timeToMinutes(slot.start_time) <= startMinutes && 
+      timeToMinutes(slot.end_time) >= endMinutes
+    )
+  }
+
+  // ⭐ 해당 시간대에 예약 가능한지 확인
+  const isTimeSlotAvailable = (date: string, startTime: string, endTime: string): boolean => {
+    const startMinutes = timeToMinutes(startTime)
+    const endMinutes = timeToMinutes(endTime)
+    
+    for (let time = startMinutes; time < endMinutes; time += 30) {
+      const currentTime = minutesToTime(time)
+      if (!isHalfHourAvailable(date, currentTime)) {
+        return false
+      }
+    }
+    
+    return true
+  }
+
+  // ⭐ 셀 클릭 - 박스 생성 (클릭한 Y 위치 기반)
+  const handleCellClick = (date: string, hour: number, e: React.MouseEvent<HTMLDivElement>) => {
+    if (!schedule || isDragging) return
+    
+    const rect = e.currentTarget.getBoundingClientRect()
+    const clickY = e.clientY - rect.top
+    const cellHeight = rect.height
+    
+    // 클릭한 위치가 셀의 위쪽 절반이면 00분, 아래쪽 절반이면 30분
+    const minute = clickY < cellHeight / 2 ? 0 : 30
+    
+    const startMinutes = hour * 60 + minute
+    const startTime = minutesToTime(startMinutes)
+    const endMinutes = startMinutes + schedule.time_slot_duration
+    const endTime = minutesToTime(endMinutes)
+    
+    if (!isTimeSlotAvailable(date, startTime, endTime)) {
+      alert('この時間帯は予約できません')
+      return
+    }
+    
+    setSelectedBlock({
+      date,
+      startTime,
+      endTime
+    })
+  }
+
+  // ⭐ 박스 드래그 시작
+  const handleBlockMouseDown = (e: React.MouseEvent) => {
+    if (!selectedBlock) return
+    
+    e.stopPropagation()
+    e.preventDefault()
+    
+    setIsDragging(true)
+    setDragStartY(e.clientY)
+    setDragInitialTop(timeToMinutes(selectedBlock.startTime))
+  }
+
+  // ⭐ 박스 드래그 중
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging || !selectedBlock || !schedule) return
+    
+    const deltaY = e.clientY - dragStartY
+    const deltaMinutes = Math.round((deltaY / 96) * 60) // 96px = 1시간
+    
+    let newStartMinutes = dragInitialTop + deltaMinutes
+    newStartMinutes = snapToHalfHour(newStartMinutes)
+    
+    // 영업시간 범위 체크 (09:00 ~ 18:00)
+    const minMinutes = 9 * 60
+    const maxMinutes = 18 * 60 - schedule.time_slot_duration
+    
+    if (newStartMinutes < minMinutes) newStartMinutes = minMinutes
+    if (newStartMinutes > maxMinutes) newStartMinutes = maxMinutes
+    
+    const newStartTime = minutesToTime(newStartMinutes)
+    const newEndMinutes = newStartMinutes + schedule.time_slot_duration
+    const newEndTime = minutesToTime(newEndMinutes)
+    
+    // 예약 가능한지 확인
+    if (!isTimeSlotAvailable(selectedBlock.date, newStartTime, newEndTime)) {
+      return
+    }
+    
+    setSelectedBlock({
+      ...selectedBlock,
+      startTime: newStartTime,
+      endTime: newEndTime
+    })
+  }
+
+  // ⭐ 박스 드래그 종료
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove)
+        window.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, selectedBlock, schedule, dragStartY, dragInitialTop])
+
+  // ⭐ 선택 취소
+  const cancelSelection = () => {
+    setSelectedBlock(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedSlot || !schedule) return
+    if (!selectedBlock || !schedule) return
 
     console.log('🚀 BOOKING SUBMISSION')
     console.log('One-time mode:', isOneTimeMode)
@@ -392,9 +520,9 @@ export default function BookingPage() {
           schedule_id: schedule.id,
           guest_name: guestInfo.name,
           guest_email: guestInfo.email,
-          booking_date: selectedSlot.date,
-          start_time: selectedSlot.start_time,
-          end_time: selectedSlot.end_time,
+          booking_date: selectedBlock.date,
+          start_time: selectedBlock.startTime,
+          end_time: selectedBlock.endTime,
           status: 'confirmed',
           is_one_time_booking: isOneTimeMode,
           one_time_token: isOneTimeMode ? oneTimeToken : null,
@@ -414,9 +542,9 @@ export default function BookingPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             scheduleId: schedule.id,
-            bookingDate: selectedSlot.date,
-            startTime: selectedSlot.start_time,
-            endTime: selectedSlot.end_time,
+            bookingDate: selectedBlock.date,
+            startTime: selectedBlock.startTime,
+            endTime: selectedBlock.endTime,
             guestName: guestInfo.name,
             guestEmail: guestInfo.email,
             guestUserId: guestUser?.id,
@@ -444,44 +572,44 @@ export default function BookingPage() {
     }
   }
 
-  // ⭐ 이전 주로 이동
-  const goToPrevWeek = () => {
+  // ⭐ 이전 3일로 이동
+  const goToPrev3Days = () => {
     if (!schedule) return
     
-    const prevWeek = new Date(currentWeekStart)
-    prevWeek.setDate(currentWeekStart.getDate() - 7)
+    const prevStart = new Date(startDate)
+    prevStart.setDate(startDate.getDate() - 3)
     
-    if (isWeekInRange(prevWeek, schedule.date_range_start, schedule.date_range_end)) {
-      setCurrentWeekStart(prevWeek)
+    if (isDateInRange(prevStart, schedule.date_range_start, schedule.date_range_end)) {
+      setStartDate(prevStart)
     }
   }
 
-  // ⭐ 다음 주로 이동
-  const goToNextWeek = () => {
+  // ⭐ 다음 3일로 이동
+  const goToNext3Days = () => {
     if (!schedule) return
     
-    const nextWeek = new Date(currentWeekStart)
-    nextWeek.setDate(currentWeekStart.getDate() + 7)
+    const nextStart = new Date(startDate)
+    nextStart.setDate(startDate.getDate() + 3)
     
-    if (isWeekInRange(nextWeek, schedule.date_range_start, schedule.date_range_end)) {
-      setCurrentWeekStart(nextWeek)
+    if (isDateInRange(nextStart, schedule.date_range_start, schedule.date_range_end)) {
+      setStartDate(nextStart)
     }
   }
 
   // ⭐ 오늘로 이동
   const goToToday = () => {
-    setCurrentWeekStart(new Date())
+    setStartDate(new Date())
   }
 
-  // ⭐ 이전/다음 주 버튼 활성화 여부
-  const canGoPrev = schedule ? isWeekInRange(
-    new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000),
+  // ⭐ 이전/다음 버튼 활성화 여부
+  const canGoPrev = schedule ? isDateInRange(
+    new Date(startDate.getTime() - 3 * 24 * 60 * 60 * 1000),
     schedule.date_range_start,
     schedule.date_range_end
   ) : false
 
-  const canGoNext = schedule ? isWeekInRange(
-    new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000),
+  const canGoNext = schedule ? isDateInRange(
+    new Date(startDate.getTime() + 3 * 24 * 60 * 60 * 1000),
     schedule.date_range_start,
     schedule.date_range_end
   ) : false
@@ -528,35 +656,24 @@ export default function BookingPage() {
     )
   }
 
-  // ⭐ 주간별 슬롯 그룹화
-  const slotsByDateAndTime = availableSlots.reduce((acc, slot) => {
-    if (!acc[slot.date]) {
-      acc[slot.date] = {}
-    }
-    const timeKey = `${slot.start_time}-${slot.end_time}`
-    if (!acc[slot.date][timeKey]) {
-      acc[slot.date][timeKey] = []
-    }
-    acc[slot.date][timeKey].push(slot)
-    return acc
-  }, {} as Record<string, Record<string, AvailabilitySlot[]>>)
+  // ⭐ 1시간 단위 시간 슬롯 (09:00, 10:00, ..., 17:00)
+  const hourSlots: number[] = []
+  for (let hour = 9; hour <= 17; hour++) {
+    hourSlots.push(hour)
+  }
 
-  // ⭐ 모든 시간대 추출 (정렬)
-  const allTimeSlots = Array.from(
-    new Set(
-      availableSlots.map(slot => `${slot.start_time}-${slot.end_time}`)
-    )
-  ).sort()
-
-  // ⭐ 현재 주의 날짜만 필터링
-  const currentWeekDates = weekDates.filter(date => 
+  // ⭐ 표시할 3일 계산 (오늘/내일/모레)
+  const displayDates = getThreeDayDates(startDate).filter(date => 
     isDateInRange(date, schedule.date_range_start, schedule.date_range_end)
   )
+
+  // ⭐ 박스 높이 계산 (1시간 = 96px)
+  const blockHeightPx = schedule ? (schedule.time_slot_duration / 60) * 96 : 96
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* ⭐ 1. 헤더 박스 (제목 + Google 로그인) */}
+        {/* 헤더 박스 */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <div className="flex items-start justify-between mb-4">
             <div className="flex-1">
@@ -586,7 +703,6 @@ export default function BookingPage() {
             </div>
           </div>
 
-          {/* Google 로그인 섹션 */}
           <div className="pt-6 border-t border-gray-200">
             {guestUser ? (
               <div className="flex items-center justify-between bg-blue-50 p-4 rounded-lg">
@@ -626,24 +742,34 @@ export default function BookingPage() {
           </div>
         </div>
 
-        {/* ⭐ 2. 예약 정보 박스 (항상 표시) */}
+        {/* 예약 정보 박스 */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">
             予約情報
           </h2>
 
-          {selectedSlot ? (
+          {selectedBlock ? (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="bg-blue-50 p-4 rounded-md mb-4">
+              <div className="bg-blue-50 p-4 rounded-md mb-4 relative">
                 <p className="text-sm font-medium text-blue-900">
                   選択した時間
                 </p>
                 <p className="text-sm text-blue-700 mt-1">
-                  {new Date(selectedSlot.date).toLocaleDateString('ja-JP')}
+                  {new Date(selectedBlock.date).toLocaleDateString('ja-JP')}
                 </p>
                 <p className="text-sm text-blue-700">
-                  {selectedSlot.start_time.slice(0, 5)} - {selectedSlot.end_time.slice(0, 5)}
+                  {selectedBlock.startTime} - {selectedBlock.endTime}
                 </p>
+                
+                {/* ⭐ 빨간 X 버튼 */}
+                <button
+                  type="button"
+                  onClick={cancelSelection}
+                  className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
+                  title="選択をキャンセル"
+                >
+                  ×
+                </button>
               </div>
 
               {isOneTimeMode && (
@@ -711,22 +837,27 @@ export default function BookingPage() {
           ) : (
             <div className="text-center py-8">
               <p className="text-gray-500">
-                下のカレンダーから予約可能な時間を選択してください
+                下のカレンダーで時間をクリックして選択してください
+              </p>
+              <p className="text-sm text-gray-400 mt-2">
+                予約時間: {schedule.time_slot_duration}分
+              </p>
+              <p className="text-sm text-gray-400">
+                選択後、ドラッグで時間を調整できます
               </p>
             </div>
           )}
         </div>
 
-        {/* ⭐ 3. 캘린더 박스 */}
+        {/* ⭐ 캘린더 박스 - 3일 뷰 (오늘 + 2일) */}
         <div className="bg-white shadow rounded-lg p-6">
-          {/* ⭐ 월 표시 + 오늘 버튼 + 이전/다음 버튼 */}
           <div className="flex items-center justify-between mb-6">
             <button
-              onClick={goToPrevWeek}
+              onClick={goToPrev3Days}
               disabled={!canGoPrev}
               className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              ← Prev
+              ← 前の3日
             </button>
             
             <div className="flex items-center gap-3">
@@ -738,16 +869,16 @@ export default function BookingPage() {
               </button>
               
               <h2 className="text-lg font-medium text-gray-900">
-                {currentWeekStart.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
+                {startDate.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
               </h2>
             </div>
             
             <button
-              onClick={goToNextWeek}
+              onClick={goToNext3Days}
               disabled={!canGoNext}
               className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Next →
+              次の3日 →
             </button>
           </div>
 
@@ -755,20 +886,19 @@ export default function BookingPage() {
             <div className="text-center py-12">
               <p className="text-gray-500">カレンダーを確認中...</p>
             </div>
-          ) : currentWeekDates.length === 0 ? (
+          ) : displayDates.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-gray-500">この週には予約可能な日がありません</p>
+              <p className="text-gray-500">この期間には予約可能な日がありません</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
+              <table className="w-full border-collapse select-none">
                 <thead>
                   <tr>
                     <th className="border border-gray-200 bg-gray-50 p-2 text-xs font-medium text-gray-500 w-20">
                       時間
                     </th>
-                    {currentWeekDates.map((date, idx) => {
-                      // ⭐ 오늘 날짜 확인
+                    {displayDates.map((date, idx) => {
                       const today = new Date()
                       const isToday = date.toISOString().split('T')[0] === today.toISOString().split('T')[0]
                       
@@ -779,7 +909,6 @@ export default function BookingPage() {
                           </div>
                           <div className="text-xs text-gray-500 flex items-center justify-center gap-1">
                             {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
-                            {/* ⭐ 오늘이면 빨간 점 표시 */}
                             {isToday && <span className="text-red-500 text-lg leading-none">●</span>}
                           </div>
                         </th>
@@ -788,35 +917,83 @@ export default function BookingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {allTimeSlots.map((timeSlot) => {
-                    const [startTime, endTime] = timeSlot.split('-')
-                    
+                  {hourSlots.map((hour) => {
                     return (
-                      <tr key={timeSlot}>
+                      <tr key={hour}>
                         <td className="border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
-                          {startTime.slice(0, 5)}
+                          {String(hour).padStart(2, '0')}:00
                         </td>
-                        {currentWeekDates.map((date, idx) => {
+                        {displayDates.map((date, dateIdx) => {
                           const dateStr = date.toISOString().split('T')[0]
-                          const slots = slotsByDateAndTime[dateStr]?.[timeSlot] || []
-                          const slot = slots[0]
-                          const isSelected = selectedSlot?.id === slot?.id
+                          
+                          const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
+                          const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
+                          const isFirstHalfAvailable = isHalfHourAvailable(dateStr, firstHalfTime)
+                          const isSecondHalfAvailable = isHalfHourAvailable(dateStr, secondHalfTime)
+                          
+                          const blockStartHour = selectedBlock ? Math.floor(timeToMinutes(selectedBlock.startTime) / 60) : -1
+                          const isBlockStart = selectedBlock && 
+                                               selectedBlock.date === dateStr && 
+                                               blockStartHour === hour
+                          
+                          const blockTopPosition = selectedBlock && isBlockStart
+                            ? timeToPixelPosition(selectedBlock.startTime) - (blockStartHour - 9) * 96
+                            : 0
 
                           return (
-                            <td key={idx} className="border border-gray-200 p-1">
-                              {slot ? (
-                                <button
-                                  onClick={() => handleSlotSelect(slot)}
-                                  className={`w-full h-16 rounded text-xs font-medium transition-colors border ${
-                                    isSelected
-                                      ? 'bg-blue-600 text-white border-blue-600'
-                                      : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-300'
+                            <td 
+                              key={dateIdx} 
+                              className="border border-gray-200 p-0 relative"
+                              style={{ height: '96px' }}
+                              onClick={(e) => handleCellClick(dateStr, hour, e)}
+                            >
+                              <div 
+                                className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
+                                  isFirstHalfAvailable 
+                                    ? 'hover:bg-blue-50' 
+                                    : 'bg-gray-200 cursor-not-allowed'
+                                }`}
+                                style={{ height: '48px' }}
+                              />
+                              
+                              <div className="absolute left-0 right-0 border-t border-gray-300 pointer-events-none" style={{ top: '48px' }} />
+                              
+                              <div 
+                                className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
+                                  isSecondHalfAvailable 
+                                    ? 'hover:bg-blue-50' 
+                                    : 'bg-gray-200 cursor-not-allowed'
+                                }`}
+                                style={{ height: '48px' }}
+                              />
+                              
+                              {isBlockStart && (
+                                <div
+                                  className={`absolute left-1 right-1 bg-blue-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-10 ${
+                                    isDragging ? 'cursor-grabbing' : 'cursor-move'
                                   }`}
+                                  style={{
+                                    top: `${blockTopPosition}px`,
+                                    height: `${blockHeightPx}px`
+                                  }}
+                                  onMouseDown={handleBlockMouseDown}
                                 >
-                                  {startTime.slice(0, 5)} - {endTime.slice(0, 5)}
-                                </button>
-                              ) : (
-                                <div className="w-full h-16 bg-gray-100"></div>
+                                  <div className="text-center relative w-full">
+                                    <div>{selectedBlock.startTime.slice(0, 5)} - {selectedBlock.endTime.slice(0, 5)}</div>
+                                    <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
+                                    
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        cancelSelection()
+                                      }}
+                                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                </div>
                               )}
                             </td>
                           )

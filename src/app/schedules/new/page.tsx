@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
@@ -12,6 +12,13 @@ interface Team {
 }
 
 type ScheduleMode = 'normal' | 'candidate' | 'interview'
+
+interface TimeBlock {
+  id: string
+  date: string
+  startTime: string
+  endTime: string
+}
 
 // ⭐ 주간 날짜 계산 함수
 function getWeekDates(baseDate: Date): Date[] {
@@ -42,6 +49,31 @@ function isWeekInRange(weekStart: Date, rangeStart: string, rangeEnd: string): b
   return weekDates.some(date => isDateInRange(date, rangeStart, rangeEnd))
 }
 
+// ⭐ 시간 계산 유틸리티
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+function minutesToTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
+}
+
+// ⭐ 30분 단위로 스냅
+function snapToHalfHour(minutes: number): number {
+  return Math.round(minutes / 30) * 30
+}
+
+// ⭐ 시간을 픽셀 위치로 변환 (09:00 = 0px, 1시간 = 96px, 30분 = 48px)
+function timeToPixelPosition(time: string): number {
+  const minutes = timeToMinutes(time)
+  const baseMinutes = 9 * 60 // 09:00
+  const relativeMinutes = minutes - baseMinutes
+  return (relativeMinutes / 60) * 96 // 1시간당 96px
+}
+
 export default function NewSchedulePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -70,11 +102,6 @@ export default function NewSchedulePage() {
   })
   const [hasBreakTime, setHasBreakTime] = useState(true)
 
-  const [candidateSlots, setCandidateSlots] = useState<Array<{
-    date: string
-    startTime: string
-    endTime: string
-  }>>([])
   const [availableTimeSlots, setAvailableTimeSlots] = useState<Array<{
     date: string
     startTime: string
@@ -94,6 +121,13 @@ export default function NewSchedulePage() {
   // ⭐ 주간 뷰 상태 (후보시간제시모드용)
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(new Date())
   const [weekDates, setWeekDates] = useState<Date[]>([])
+
+  // ⭐ 드래그 상태
+  const [selectedBlocks, setSelectedBlocks] = useState<TimeBlock[]>([])
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragBlockId, setDragBlockId] = useState<string | null>(null)
+  const [dragStartY, setDragStartY] = useState(0)
+  const [dragInitialTop, setDragInitialTop] = useState(0)
 
   useEffect(() => {
     checkUser()
@@ -246,18 +280,157 @@ export default function NewSchedulePage() {
     }
   }
 
-  const toggleCandidateSlot = (slot: { date: string, startTime: string, endTime: string }) => {
-    const exists = candidateSlots.some(
-      s => s.date === slot.date && s.startTime === slot.startTime
+  // ⭐ 특정 30분 슬롯이 예약 가능한지 확인
+  const isHalfHourAvailable = (date: string, startTime: string): boolean => {
+    const startMinutes = timeToMinutes(startTime)
+    const endMinutes = startMinutes + 30
+    
+    return availableTimeSlots.some(slot => 
+      slot.date === date &&
+      timeToMinutes(slot.startTime) <= startMinutes && 
+      timeToMinutes(slot.endTime) >= endMinutes
+    )
+  }
+
+  // ⭐ 해당 시간대에 예약 가능한지 확인
+  const isTimeSlotAvailable = (date: string, startTime: string, endTime: string): boolean => {
+    const startMinutes = timeToMinutes(startTime)
+    const endMinutes = timeToMinutes(endTime)
+    
+    for (let time = startMinutes; time < endMinutes; time += 30) {
+      const currentTime = minutesToTime(time)
+      if (!isHalfHourAvailable(date, currentTime)) {
+        return false
+      }
+    }
+    
+    return true
+  }
+
+  // ⭐ 셀 클릭 - 박스 생성 (클릭한 Y 위치 기반)
+  const handleCellClick = (date: string, hour: number, e: React.MouseEvent<HTMLDivElement>) => {
+    if (!formData.timeSlotDuration || isDragging) return
+    
+    const rect = e.currentTarget.getBoundingClientRect()
+    const clickY = e.clientY - rect.top
+    const cellHeight = rect.height
+    
+    // 클릭한 위치가 셀의 위쪽 절반이면 00분, 아래쪽 절반이면 30분
+    const minute = clickY < cellHeight / 2 ? 0 : 30
+    
+    const startMinutes = hour * 60 + minute
+    const startTime = minutesToTime(startMinutes)
+    const endMinutes = startMinutes + formData.timeSlotDuration
+    const endTime = minutesToTime(endMinutes)
+    
+    if (!isTimeSlotAvailable(date, startTime, endTime)) {
+      alert('この時間帯は予約できません')
+      return
+    }
+    
+    // 같은 시간에 이미 박스가 있는지 확인
+    const exists = selectedBlocks.some(
+      b => b.date === date && b.startTime === startTime
     )
     
     if (exists) {
-      setCandidateSlots(candidateSlots.filter(
-        s => !(s.date === slot.date && s.startTime === slot.startTime)
-      ))
-    } else {
-      setCandidateSlots([...candidateSlots, slot])
+      alert('既に選択されている時間です')
+      return
     }
+    
+    // 새 박스 생성
+    const newBlock: TimeBlock = {
+      id: uuidv4(),
+      date,
+      startTime,
+      endTime
+    }
+    
+    setSelectedBlocks([...selectedBlocks, newBlock])
+  }
+
+  // ⭐ 박스 드래그 시작
+  const handleBlockMouseDown = (blockId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    
+    const block = selectedBlocks.find(b => b.id === blockId)
+    if (!block) return
+    
+    setIsDragging(true)
+    setDragBlockId(blockId)
+    setDragStartY(e.clientY)
+    setDragInitialTop(timeToMinutes(block.startTime))
+  }
+
+  // ⭐ 박스 드래그 중
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging || !dragBlockId || !formData.timeSlotDuration) return
+    
+    const block = selectedBlocks.find(b => b.id === dragBlockId)
+    if (!block) return
+    
+    const deltaY = e.clientY - dragStartY
+    const deltaMinutes = Math.round((deltaY / 96) * 60) // 96px = 1시간
+    
+    let newStartMinutes = dragInitialTop + deltaMinutes
+    newStartMinutes = snapToHalfHour(newStartMinutes)
+    
+    // 영업시간 범위 체크 (09:00 ~ 18:00)
+    const minMinutes = 9 * 60
+    const maxMinutes = 18 * 60 - formData.timeSlotDuration
+    
+    if (newStartMinutes < minMinutes) newStartMinutes = minMinutes
+    if (newStartMinutes > maxMinutes) newStartMinutes = maxMinutes
+    
+    const newStartTime = minutesToTime(newStartMinutes)
+    const newEndMinutes = newStartMinutes + formData.timeSlotDuration
+    const newEndTime = minutesToTime(newEndMinutes)
+    
+    // 예약 가능한지 확인
+    if (!isTimeSlotAvailable(block.date, newStartTime, newEndTime)) {
+      return
+    }
+    
+    // 다른 박스와 겹치는지 확인
+    const overlaps = selectedBlocks.some(b => 
+      b.id !== dragBlockId &&
+      b.date === block.date &&
+      b.startTime === newStartTime
+    )
+    
+    if (overlaps) {
+      return
+    }
+    
+    // 박스 업데이트
+    setSelectedBlocks(selectedBlocks.map(b => 
+      b.id === dragBlockId 
+        ? { ...b, startTime: newStartTime, endTime: newEndTime }
+        : b
+    ))
+  }
+
+  // ⭐ 박스 드래그 종료
+  const handleMouseUp = () => {
+    setIsDragging(false)
+    setDragBlockId(null)
+  }
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove)
+        window.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, selectedBlocks, dragBlockId, dragStartY, dragInitialTop, formData.timeSlotDuration])
+
+  // ⭐ 박스 삭제
+  const removeBlock = (blockId: string) => {
+    setSelectedBlocks(selectedBlocks.filter(b => b.id !== blockId))
   }
 
   const addGuest = () => {
@@ -349,7 +522,7 @@ export default function NewSchedulePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (scheduleMode === 'candidate' && candidateSlots.length === 0) {
+    if (scheduleMode === 'candidate' && selectedBlocks.length === 0) {
       alert('候補時間を最低1つ選択してください')
       return
     }
@@ -368,6 +541,13 @@ export default function NewSchedulePage() {
 
       const shareLink = uuidv4()
 
+      // ⭐ selectedBlocks를 candidate_slots 형식으로 변환
+      const candidateSlotsData = selectedBlocks.map(block => ({
+        date: block.date,
+        startTime: block.startTime,
+        endTime: block.endTime
+      }))
+
       const { data: scheduleData, error: scheduleError } = await supabase
         .from('schedules')
         .insert({
@@ -382,7 +562,7 @@ export default function NewSchedulePage() {
           is_one_time_link: false,
           is_used: false,
           is_candidate_mode: scheduleMode === 'candidate',
-          candidate_slots: scheduleMode === 'candidate' ? candidateSlots : null,
+          candidate_slots: scheduleMode === 'candidate' ? candidateSlotsData : null,
           is_interview_mode: scheduleMode === 'interview',
           interview_time_start: scheduleMode === 'interview' ? interviewTimeSettings.startTime : null,
           interview_time_end: scheduleMode === 'interview' ? interviewTimeSettings.endTime : null,
@@ -433,30 +613,19 @@ export default function NewSchedulePage() {
     )
   }
 
-  // ⭐ 주간별 슬롯 그룹화
-  const slotsByDateAndTime = availableTimeSlots.reduce((acc, slot) => {
-    if (!acc[slot.date]) {
-      acc[slot.date] = {}
-    }
-    const timeKey = `${slot.startTime}-${slot.endTime}`
-    if (!acc[slot.date][timeKey]) {
-      acc[slot.date][timeKey] = []
-    }
-    acc[slot.date][timeKey].push(slot)
-    return acc
-  }, {} as Record<string, Record<string, typeof availableTimeSlots>>)
-
-  // ⭐ 모든 시간대 추출 (정렬)
-  const allTimeSlots = Array.from(
-    new Set(
-      availableTimeSlots.map(slot => `${slot.startTime}-${slot.endTime}`)
-    )
-  ).sort()
+  // ⭐ 1시간 단위 시간 슬롯 (09:00, 10:00, ..., 17:00)
+  const hourSlots: number[] = []
+  for (let hour = 9; hour <= 17; hour++) {
+    hourSlots.push(hour)
+  }
 
   // ⭐ 현재 주의 날짜만 필터링
   const currentWeekDates = weekDates.filter(date => 
     isDateInRange(date, formData.dateRangeStart, formData.dateRangeEnd)
   )
+
+  // ⭐ 박스 높이 계산 (1시간 = 96px)
+  const blockHeightPx = formData.timeSlotDuration ? (formData.timeSlotDuration / 60) * 96 : 96
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -777,7 +946,7 @@ export default function NewSchedulePage() {
               <div className="space-y-3 bg-purple-50 p-4 rounded-md border border-purple-200">
                 <p className="text-sm text-purple-800">
                   あなたのGoogleカレンダーと照合して、空いている時間のみ表示されます。<br />
-                  候補時間を選択してください。ゲストはこの中から希望時間を選んで返信できます。
+                  候補時間をクリックして選択してください。選択後、ドラッグで時間を調整できます。
                 </p>
 
                 {loadingSlots ? (
@@ -818,58 +987,118 @@ export default function NewSchedulePage() {
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full border-collapse">
+                        <table className="w-full border-collapse select-none">
                           <thead>
                             <tr>
                               <th className="border border-gray-200 bg-gray-50 p-2 text-xs font-medium text-gray-500 w-20">
                                 時間
                               </th>
-                              {currentWeekDates.map((date, idx) => (
-                                <th key={idx} className="border border-gray-200 bg-gray-50 p-2 text-sm font-medium text-gray-900">
-                                  <div>
-                                    {date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
-                                  </div>
-                                  <div className="text-xs text-gray-500">
-                                    {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
-                                  </div>
-                                </th>
-                              ))}
+                              {currentWeekDates.map((date, idx) => {
+                                const today = new Date()
+                                const isToday = date.toISOString().split('T')[0] === today.toISOString().split('T')[0]
+                                
+                                return (
+                                  <th key={idx} className="border border-gray-200 bg-gray-50 p-2 text-sm font-medium text-gray-900">
+                                    <div>
+                                      {date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
+                                    </div>
+                                    <div className="text-xs text-gray-500 flex items-center justify-center gap-1">
+                                      {date.toLocaleDateString('ja-JP', { weekday: 'short' })}
+                                      {isToday && <span className="text-red-500 text-lg leading-none">●</span>}
+                                    </div>
+                                  </th>
+                                )
+                              })}
                             </tr>
                           </thead>
                           <tbody>
-                            {allTimeSlots.map((timeSlot) => {
-                              const [startTime, endTime] = timeSlot.split('-')
-                              
+                            {hourSlots.map((hour) => {
                               return (
-                                <tr key={timeSlot}>
+                                <tr key={hour}>
                                   <td className="border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
-                                    {startTime.slice(0, 5)}
+                                    {String(hour).padStart(2, '0')}:00
                                   </td>
-                                  {currentWeekDates.map((date, idx) => {
+                                  {currentWeekDates.map((date, dateIdx) => {
                                     const dateStr = date.toISOString().split('T')[0]
-                                    const slots = slotsByDateAndTime[dateStr]?.[timeSlot] || []
-                                    const slot = slots[0]
-                                    const isSelected = slot && candidateSlots.some(
-                                      s => s.date === slot.date && s.startTime === slot.startTime
-                                    )
+                                    
+                                    // ⭐ 00분, 30분 각각 예약 가능 여부 확인
+                                    const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
+                                    const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
+                                    const isFirstHalfAvailable = isHalfHourAvailable(dateStr, firstHalfTime)
+                                    const isSecondHalfAvailable = isHalfHourAvailable(dateStr, secondHalfTime)
+                                    
+                                    // ⭐ 이 셀에 박스가 시작하는지 확인
+                                    const blocksInCell = selectedBlocks.filter(block => {
+                                      const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
+                                      return block.date === dateStr && blockStartHour === hour
+                                    })
 
                                     return (
-                                      <td key={idx} className="border border-gray-200 p-1">
-                                        {slot ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => toggleCandidateSlot(slot)}
-                                            className={`w-full h-16 rounded text-xs font-medium transition-colors border ${
-                                              isSelected
-                                                ? 'bg-purple-600 text-white border-purple-600'
-                                                : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-300'
-                                            }`}
-                                          >
-                                            {startTime.slice(0, 5)} - {endTime.slice(0, 5)}
-                                          </button>
-                                        ) : (
-                                          <div className="w-full h-16 bg-gray-100"></div>
-                                        )}
+                                      <td 
+                                        key={dateIdx} 
+                                        className="border border-gray-200 p-0 relative"
+                                        style={{ height: '96px' }}
+                                        onClick={(e) => handleCellClick(dateStr, hour, e)}
+                                      >
+                                        {/* ⭐ 배경 - 위쪽 절반 (00분) */}
+                                        <div 
+                                          className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
+                                            isFirstHalfAvailable 
+                                              ? 'hover:bg-purple-50' 
+                                              : 'bg-gray-200 cursor-not-allowed'
+                                          }`}
+                                          style={{ height: '48px' }}
+                                        />
+                                        
+                                        {/* ⭐ 30분 구분선 */}
+                                        <div className="absolute left-0 right-0 border-t border-gray-300 pointer-events-none" style={{ top: '48px' }} />
+                                        
+                                        {/* ⭐ 배경 - 아래쪽 절반 (30분) */}
+                                        <div 
+                                          className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
+                                            isSecondHalfAvailable 
+                                              ? 'hover:bg-purple-50' 
+                                              : 'bg-gray-200 cursor-not-allowed'
+                                          }`}
+                                          style={{ height: '48px' }}
+                                        />
+                                        
+                                        {/* ⭐ 선택된 박스들 렌더링 */}
+                                        {blocksInCell.map((block) => {
+                                          const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
+                                          const blockTopPosition = timeToPixelPosition(block.startTime) - (blockStartHour - 9) * 96
+
+                                          return (
+                                            <div
+                                              key={block.id}
+                                              className={`absolute left-1 right-1 bg-purple-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-10 group ${
+                                                isDragging && dragBlockId === block.id ? 'cursor-grabbing' : 'cursor-move'
+                                              }`}
+                                              style={{
+                                                top: `${blockTopPosition}px`,
+                                                height: `${blockHeightPx}px`
+                                              }}
+                                              onMouseDown={(e) => handleBlockMouseDown(block.id, e)}
+                                            >
+                                              <div className="text-center relative w-full">
+                                                <div>{block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}</div>
+                                                <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
+                                                
+                                                {/* ⭐ 삭제 버튼 */}
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    removeBlock(block.id)
+                                                  }}
+                                                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600"
+                                                >
+                                                  ×
+                                                </button>
+                                              </div>
+                                            </div>
+                                          )
+                                        })}
                                       </td>
                                     )
                                   })}
@@ -885,10 +1114,10 @@ export default function NewSchedulePage() {
                   <p className="text-sm text-gray-500">日付を選択すると空き時間が表示されます</p>
                 )}
 
-                {candidateSlots.length > 0 && (
+                {selectedBlocks.length > 0 && (
                   <div className="mt-3 p-3 bg-purple-100 rounded-md">
                     <p className="text-sm font-medium text-purple-900">
-                      選択済み: {candidateSlots.length}個の候補時間
+                      選択済み: {selectedBlocks.length}個の候補時間
                     </p>
                   </div>
                 )}
