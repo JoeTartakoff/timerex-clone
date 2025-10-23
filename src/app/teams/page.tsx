@@ -32,6 +32,9 @@ export default function TeamsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [teamName, setTeamName] = useState('')
   const [teamDescription, setTeamDescription] = useState('')
+  
+  // ⭐ 사이드바 열림/닫힘 상태
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   useEffect(() => {
     checkUser()
@@ -251,10 +254,32 @@ export default function TeamsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* 왼쪽 사이드바 - Navigation만 */}
-      <aside className="w-64 bg-white shadow-lg flex flex-col">
-        <div className="p-6 border-b border-gray-200">
+      {/* ⭐ 모바일 오버레이 */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* ⭐ 왼쪽 사이드바 */}
+      <aside className={`
+        fixed lg:static inset-y-0 left-0 z-50
+        w-64 bg-white shadow-lg flex flex-col
+        transform transition-transform duration-300 ease-in-out
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">ヤクソクAI</h1>
+          {/* ⭐ 모바일 닫기 버튼 */}
+          <button
+            onClick={() => setIsSidebarOpen(false)}
+            className="lg:hidden p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-4">
@@ -268,6 +293,7 @@ export default function TeamsPage() {
               <Link
                 href="/dashboard"
                 className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50"
+                onClick={() => setIsSidebarOpen(false)}
               >
                 <span>📅</span>
                 <span>スケジュール</span>
@@ -275,6 +301,7 @@ export default function TeamsPage() {
               <Link
                 href="/teams"
                 className="flex items-center gap-3 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 font-medium"
+                onClick={() => setIsSidebarOpen(false)}
               >
                 <span>👥</span>
                 <span>チーム管理</span>
@@ -299,6 +326,7 @@ export default function TeamsPage() {
                     key={team.id}
                     href={`/teams/${team.id}`}
                     className="flex items-center justify-between px-3 py-2 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    onClick={() => setIsSidebarOpen(false)}
                   >
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       <span>👥</span>
@@ -327,14 +355,30 @@ export default function TeamsPage() {
         </div>
       </aside>
 
-      {/* 메인 컨텐츠 영역 */}
+      {/* ⭐ 메인 컨텐츠 영역 */}
       <main className="flex-1 overflow-y-auto">
+        {/* ⭐ 모바일 헤더 (햄버거 버튼) */}
+        <div className="lg:hidden bg-white shadow-sm sticky top-0 z-30">
+          <div className="flex items-center justify-between px-4 py-3">
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h1 className="text-lg font-bold text-gray-900">チーム管理</h1>
+            <div className="w-10"></div>
+          </div>
+        </div>
+
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <h2 className="text-2xl font-bold text-gray-900">チーム管理</h2>
             <button
               onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
             >
               + 新しいチーム作成
             </button>
