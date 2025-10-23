@@ -1011,101 +1011,116 @@ export default function NewSchedulePage() {
                               })}
                             </tr>
                           </thead>
-                          <tbody>
-                            {hourSlots.map((hour) => {
-                              return (
-                                <tr key={hour}>
-                                  <td className="border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
-                                    {String(hour).padStart(2, '0')}:00
-                                  </td>
-                                  {currentWeekDates.map((date, dateIdx) => {
-                                    const dateStr = date.toISOString().split('T')[0]
-                                    
-                                    // ⭐ 00분, 30분 각각 예약 가능 여부 확인
-                                    const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
-                                    const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
-                                    const isFirstHalfAvailable = isHalfHourAvailable(dateStr, firstHalfTime)
-                                    const isSecondHalfAvailable = isHalfHourAvailable(dateStr, secondHalfTime)
-                                    
-                                    // ⭐ 이 셀에 박스가 시작하는지 확인
-                                    const blocksInCell = selectedBlocks.filter(block => {
-                                      const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
-                                      return block.date === dateStr && blockStartHour === hour
-                                    })
+<tbody>
+  {hourSlots.map((hour) => {
+    return (
+      <tr key={hour}>
+        <td className="border border-gray-300 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
+          {String(hour).padStart(2, '0')}:00
+        </td>
+        {currentWeekDates.map((date, dateIdx) => {
+          const dateStr = date.toISOString().split('T')[0]
+          
+          const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
+          const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
+          const isFirstHalfAvailable = isHalfHourAvailable(dateStr, firstHalfTime)
+          const isSecondHalfAvailable = isHalfHourAvailable(dateStr, secondHalfTime)
+          
+          const blocksInCell = selectedBlocks.filter(block => {
+            const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
+            return block.date === dateStr && blockStartHour === hour
+          })
 
-                                    return (
-                                      <td 
-                                        key={dateIdx} 
-                                        className="border border-gray-200 p-0 relative"
-                                        style={{ height: '96px' }}
-                                        onClick={(e) => handleCellClick(dateStr, hour, e)}
-                                      >
-                                        {/* ⭐ 배경 - 위쪽 절반 (00분) */}
-                                        <div 
-                                          className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
-                                            isFirstHalfAvailable 
-                                              ? 'hover:bg-purple-50' 
-                                              : 'bg-gray-200 cursor-not-allowed'
-                                          }`}
-                                          style={{ height: '48px' }}
-                                        />
-                                        
-                                        {/* ⭐ 30분 구분선 */}
-                                        <div className="absolute left-0 right-0 border-t border-gray-300 pointer-events-none" style={{ top: '48px' }} />
-                                        
-                                        {/* ⭐ 배경 - 아래쪽 절반 (30분) */}
-                                        <div 
-                                          className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
-                                            isSecondHalfAvailable 
-                                              ? 'hover:bg-purple-50' 
-                                              : 'bg-gray-200 cursor-not-allowed'
-                                          }`}
-                                          style={{ height: '48px' }}
-                                        />
-                                        
-                                        {/* ⭐ 선택된 박스들 렌더링 */}
-                                        {blocksInCell.map((block) => {
-                                          const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
-                                          const blockTopPosition = timeToPixelPosition(block.startTime) - (blockStartHour - 9) * 96
+          return (
+            <td 
+              key={dateIdx} 
+              className="border border-gray-300 p-0 relative"
+              style={{ height: '96px' }}
+              onClick={(e) => handleCellClick(dateStr, hour, e)}
+            >
+              {/* ⭐ 위쪽 절반 (00분) */}
+              <div 
+                className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
+                  isFirstHalfAvailable 
+                    ? 'hover:bg-purple-50' 
+                    : 'bg-gray-200 cursor-not-allowed'
+                }`}
+                style={{ height: '48px' }}
+              >
+                {/* ⭐ 예약 불가 문구 */}
+                {!isFirstHalfAvailable && (
+                  <div className="flex items-center justify-center h-full">
+                    <span className="text-xs text-gray-400 font-medium opacity-80">予定あり</span>
+                  </div>
+                )}
+              </div>
+              
+              {/* ⭐ 30분 구분선 (점선) */}
+              <div 
+                className="absolute left-0 right-0 border-t border-dashed border-gray-300 pointer-events-none z-10" 
+                style={{ top: '48px' }} 
+              />
+              
+              {/* ⭐ 아래쪽 절반 (30분) */}
+              <div 
+                className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
+                  isSecondHalfAvailable 
+                    ? 'hover:bg-purple-50' 
+                    : 'bg-gray-200 cursor-not-allowed'
+                }`}
+                style={{ height: '48px' }}
+              >
+                {/* ⭐ 예약 불가 문구 */}
+                {!isSecondHalfAvailable && (
+                  <div className="flex items-center justify-center h-full">
+                    <span className="text-xs text-gray-400 font-medium opacity-80">予定あり</span>
+                  </div>
+                )}
+              </div>
+              
+              {/* 선택된 박스들 */}
+              {blocksInCell.map((block) => {
+                const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
+                const blockTopPosition = timeToPixelPosition(block.startTime) - (blockStartHour - 9) * 96
 
-                                          return (
-                                            <div
-                                              key={block.id}
-                                              className={`absolute left-1 right-1 bg-purple-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-10 group ${
-                                                isDragging && dragBlockId === block.id ? 'cursor-grabbing' : 'cursor-move'
-                                              }`}
-                                              style={{
-                                                top: `${blockTopPosition}px`,
-                                                height: `${blockHeightPx}px`
-                                              }}
-                                              onMouseDown={(e) => handleBlockMouseDown(block.id, e)}
-                                            >
-                                              <div className="text-center relative w-full">
-                                                <div>{block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}</div>
-                                                <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
-                                                
-                                                {/* ⭐ 삭제 버튼 */}
-                                                <button
-                                                  type="button"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation()
-                                                    removeBlock(block.id)
-                                                  }}
-                                                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600"
-                                                >
-                                                  ×
-                                                </button>
-                                              </div>
-                                            </div>
-                                          )
-                                        })}
-                                      </td>
-                                    )
-                                  })}
-                                </tr>
-                              )
-                            })}
-                          </tbody>
+                return (
+                  <div
+                    key={block.id}
+                    className={`absolute left-1 right-1 bg-purple-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-20 group ${
+                      isDragging && dragBlockId === block.id ? 'cursor-grabbing' : 'cursor-move'
+                    }`}
+                    style={{
+                      top: `${blockTopPosition}px`,
+                      height: `${blockHeightPx}px`
+                    }}
+                    onMouseDown={(e) => handleBlockMouseDown(block.id, e)}
+                  >
+                    <div className="text-center relative w-full">
+                      <div>{block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}</div>
+                      <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
+                      
+                      {/* ⭐ 삭제 버튼 (항상 표시) */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeBlock(block.id)
+                        }}
+                        className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600 transition-colors shadow-md z-30"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </td>
+          )
+        })}
+      </tr>
+    )
+  })}
+</tbody>
                         </table>
                       </div>
                     )}

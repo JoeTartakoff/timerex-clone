@@ -923,81 +923,100 @@ export default function BookingPage() {
                         <td className="border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
                           {String(hour).padStart(2, '0')}:00
                         </td>
-                        {displayDates.map((date, dateIdx) => {
-                          const dateStr = date.toISOString().split('T')[0]
-                          
-                          const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
-                          const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
-                          const isFirstHalfAvailable = isHalfHourAvailable(dateStr, firstHalfTime)
-                          const isSecondHalfAvailable = isHalfHourAvailable(dateStr, secondHalfTime)
-                          
-                          const blockStartHour = selectedBlock ? Math.floor(timeToMinutes(selectedBlock.startTime) / 60) : -1
-                          const isBlockStart = selectedBlock && 
-                                               selectedBlock.date === dateStr && 
-                                               blockStartHour === hour
-                          
-                          const blockTopPosition = selectedBlock && isBlockStart
-                            ? timeToPixelPosition(selectedBlock.startTime) - (blockStartHour - 9) * 96
-                            : 0
+{displayDates.map((date, dateIdx) => {
+  const dateStr = date.toISOString().split('T')[0]
+  
+  const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
+  const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
+  const isFirstHalfAvailable = isHalfHourAvailable(dateStr, firstHalfTime)
+  const isSecondHalfAvailable = isHalfHourAvailable(dateStr, secondHalfTime)
+  
+  const blockStartHour = selectedBlock ? Math.floor(timeToMinutes(selectedBlock.startTime) / 60) : -1
+  const isBlockStart = selectedBlock && 
+                       selectedBlock.date === dateStr && 
+                       blockStartHour === hour
+  
+  const blockTopPosition = selectedBlock && isBlockStart
+    ? timeToPixelPosition(selectedBlock.startTime) - (blockStartHour - 9) * 96
+    : 0
 
-                          return (
-                            <td 
-                              key={dateIdx} 
-                              className="border border-gray-200 p-0 relative"
-                              style={{ height: '96px' }}
-                              onClick={(e) => handleCellClick(dateStr, hour, e)}
-                            >
-                              <div 
-                                className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
-                                  isFirstHalfAvailable 
-                                    ? 'hover:bg-blue-50' 
-                                    : 'bg-gray-200 cursor-not-allowed'
-                                }`}
-                                style={{ height: '48px' }}
-                              />
-                              
-                              <div className="absolute left-0 right-0 border-t border-gray-300 pointer-events-none" style={{ top: '48px' }} />
-                              
-                              <div 
-                                className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
-                                  isSecondHalfAvailable 
-                                    ? 'hover:bg-blue-50' 
-                                    : 'bg-gray-200 cursor-not-allowed'
-                                }`}
-                                style={{ height: '48px' }}
-                              />
-                              
-                              {isBlockStart && (
-                                <div
-                                  className={`absolute left-1 right-1 bg-blue-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-10 ${
-                                    isDragging ? 'cursor-grabbing' : 'cursor-move'
-                                  }`}
-                                  style={{
-                                    top: `${blockTopPosition}px`,
-                                    height: `${blockHeightPx}px`
-                                  }}
-                                  onMouseDown={handleBlockMouseDown}
-                                >
-                                  <div className="text-center relative w-full">
-                                    <div>{selectedBlock.startTime.slice(0, 5)} - {selectedBlock.endTime.slice(0, 5)}</div>
-                                    <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
-                                    
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        cancelSelection()
-                                      }}
-                                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
-                                    >
-                                      ×
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                          )
-                        })}
+  return (
+    <td 
+      key={dateIdx} 
+      className="border border-gray-300 p-0 relative"
+      style={{ height: '96px' }}
+      onClick={(e) => handleCellClick(dateStr, hour, e)}
+    >
+      {/* ⭐ 위쪽 절반 (00분) */}
+      <div 
+        className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
+          isFirstHalfAvailable 
+            ? 'hover:bg-blue-50' 
+            : 'bg-gray-200 cursor-not-allowed'
+        }`}
+        style={{ height: '48px' }}
+      >
+        {/* ⭐ 예약 불가 문구 */}
+        {!isFirstHalfAvailable && (
+          <div className="flex items-center justify-center h-full">
+<span className="text-xs text-gray-400 font-medium opacity-80">予約不可</span>          </div>
+        )}
+      </div>
+      
+      {/* 30분 구분선 (점선) */}
+      <div 
+        className="absolute left-0 right-0 border-t border-dashed border-gray-300 pointer-events-none z-10" 
+        style={{ top: '48px' }} 
+      />
+      
+      {/* ⭐ 아래쪽 절반 (30분) */}
+      <div 
+        className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
+          isSecondHalfAvailable 
+            ? 'hover:bg-blue-50' 
+            : 'bg-gray-200 cursor-not-allowed'
+        }`}
+        style={{ height: '48px' }}
+      >
+        {/* ⭐ 예약 불가 문구 */}
+        {!isSecondHalfAvailable && (
+          <div className="flex items-center justify-center h-full">
+<span className="text-xs text-gray-400 font-medium opacity-80">予約不可</span>          </div>
+        )}
+      </div>
+      
+      {/* 선택된 박스 */}
+      {isBlockStart && (
+        <div
+          className={`absolute left-1 right-1 bg-blue-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-20 ${
+            isDragging ? 'cursor-grabbing' : 'cursor-move'
+          }`}
+          style={{
+            top: `${blockTopPosition}px`,
+            height: `${blockHeightPx}px`
+          }}
+          onMouseDown={handleBlockMouseDown}
+        >
+          <div className="text-center relative w-full">
+            <div>{selectedBlock.startTime.slice(0, 5)} - {selectedBlock.endTime.slice(0, 5)}</div>
+            <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
+            
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                cancelSelection()
+              }}
+              className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md z-30"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+    </td>
+  )
+})}
                       </tr>
                     )
                   })}
