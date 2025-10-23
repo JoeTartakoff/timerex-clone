@@ -84,6 +84,9 @@ export default function DashboardPage() {
   const [showFolderModal, setShowFolderModal] = useState(false)
   const [folderName, setFolderName] = useState('')
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null)
+  
+  // ⭐ 사이드바 열림/닫힘 상태
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   useEffect(() => {
     checkUser()
@@ -475,10 +478,32 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* 왼쪽 사이드바 - 폴더 목록 */}
-      <aside className="w-64 bg-white shadow-lg flex flex-col">
-        <div className="p-6 border-b border-gray-200">
+      {/* ⭐ 모바일 오버레이 (사이드바 열렸을 때) */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* ⭐ 왼쪽 사이드바 - 모바일에서는 슬라이드 */}
+      <aside className={`
+        fixed lg:static inset-y-0 left-0 z-50
+        w-64 bg-white shadow-lg flex flex-col
+        transform transition-transform duration-300 ease-in-out
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">ヤクソクAI</h1>
+          {/* ⭐ 모바일 닫기 버튼 */}
+          <button
+            onClick={() => setIsSidebarOpen(false)}
+            className="lg:hidden p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-4">
@@ -492,6 +517,7 @@ export default function DashboardPage() {
               <Link
                 href="/dashboard"
                 className="flex items-center gap-3 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 font-medium"
+                onClick={() => setIsSidebarOpen(false)}
               >
                 <span>📅</span>
                 <span>スケジュール</span>
@@ -499,6 +525,7 @@ export default function DashboardPage() {
               <Link
                 href="/teams"
                 className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-gray-50"
+                onClick={() => setIsSidebarOpen(false)}
               >
                 <span>👥</span>
                 <span>チーム管理</span>
@@ -522,7 +549,10 @@ export default function DashboardPage() {
 
             <div className="space-y-1">
               <button
-                onClick={() => setSelectedFolder(null)}
+                onClick={() => {
+                  setSelectedFolder(null)
+                  setIsSidebarOpen(false)
+                }}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
                   selectedFolder === null
                     ? 'bg-blue-50 text-blue-700 font-medium'
@@ -539,7 +569,10 @@ export default function DashboardPage() {
               </button>
 
               <button
-                onClick={() => setSelectedFolder('uncategorized')}
+                onClick={() => {
+                  setSelectedFolder('uncategorized')
+                  setIsSidebarOpen(false)
+                }}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
                   selectedFolder === 'uncategorized'
                     ? 'bg-blue-50 text-blue-700 font-medium'
@@ -558,7 +591,10 @@ export default function DashboardPage() {
               {folders.map((folder) => (
                 <div key={folder.id} className="group relative">
                   <button
-                    onClick={() => setSelectedFolder(folder.id)}
+                    onClick={() => {
+                      setSelectedFolder(folder.id)
+                      setIsSidebarOpen(false)
+                    }}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
                       selectedFolder === folder.id
                         ? 'bg-blue-50 text-blue-700 font-medium'
@@ -618,8 +654,24 @@ export default function DashboardPage() {
         </div>
       </aside>
 
-      {/* 메인 컨텐츠 영역 */}
+      {/* ⭐ 메인 컨텐츠 영역 */}
       <main className="flex-1 overflow-y-auto">
+        {/* ⭐ 모바일 헤더 (햄버거 버튼) */}
+        <div className="lg:hidden bg-white shadow-sm sticky top-0 z-30">
+          <div className="flex items-center justify-between px-4 py-3">
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h1 className="text-lg font-bold text-gray-900">ヤクソクAI</h1>
+            <div className="w-10"></div>
+          </div>
+        </div>
+
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="mb-6 bg-white shadow rounded-lg p-4">
             <h3 className="text-sm font-medium text-gray-900 mb-3">
@@ -628,8 +680,8 @@ export default function DashboardPage() {
             <p className="text-xs text-gray-500 mb-3">
               ゲスト情報を入力してからリンクをコピーすると、専用リンクが生成されます
             </p>
-            <div className="flex gap-3 items-end">
-              <div className="flex-1">
+            <div className="flex flex-col sm:flex-row gap-3 items-end">
+              <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   名前
                 </label>
@@ -641,7 +693,7 @@ export default function DashboardPage() {
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                 />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   メールアドレス
                 </label>
@@ -655,7 +707,7 @@ export default function DashboardPage() {
               </div>
               <button
                 onClick={() => setQuickGuestInfo({ name: '', email: '' })}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
               >
                 クリア
               </button>
@@ -692,10 +744,10 @@ export default function DashboardPage() {
             ) : (
               <div className="divide-y divide-gray-200">
                 {filteredSchedules.map((schedule) => (
-                  <div key={schedule.id} className="px-6 py-4">
-                    <div className="flex items-start justify-between">
+                  <div key={schedule.id} className="px-4 sm:px-6 py-4">
+                    <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
                           <h3 className="text-lg font-medium text-gray-900">
                             {schedule.title}
                           </h3>
@@ -715,7 +767,7 @@ export default function DashboardPage() {
                             {schedule.description}
                           </p>
                         )}
-                        <div className="flex items-center space-x-4 text-sm text-gray-500">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500">
                           <span>
                             📅 {schedule.date_range_start} ～ {schedule.date_range_end}
                           </span>
@@ -808,7 +860,7 @@ export default function DashboardPage() {
                                     onClick={() => copyPersonalizedLink(schedule.share_link, guest.custom_token, guest.guest_name)}
                                     className="ml-2 px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 whitespace-nowrap"
                                   >
-                                    専用リンクをコピー
+                                    専用リンク
                                   </button>
                                 </div>
                               ))}
@@ -817,24 +869,24 @@ export default function DashboardPage() {
                         )}
                       </div>
                       
-                      <div className="ml-4 flex items-center gap-2">
+                      <div className="flex flex-wrap lg:flex-nowrap items-center gap-2">
                         <Link
                           href={`/schedules/${schedule.id}/edit`}
-                          className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 whitespace-nowrap"
+                          className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 whitespace-nowrap text-center"
                         >
                           編集
                         </Link>
                         {!schedule.is_candidate_mode && !schedule.is_interview_mode && (
                           <button
                             onClick={() => copyOneTimeLink(schedule.share_link)}
-                            className="px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
+                            className="flex-1 sm:flex-initial px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
                           >
-                            ワンタイムリンクをコピー
+                            ワンタイム
                           </button>
                         )}
                         <button
                           onClick={() => copyFixedLink(schedule.share_link, schedule.is_candidate_mode, schedule.is_interview_mode)}
-                          className={`px-3 py-2 border rounded-md text-sm font-medium whitespace-nowrap ${
+                          className={`flex-1 sm:flex-initial px-3 py-2 border rounded-md text-sm font-medium whitespace-nowrap ${
                             schedule.is_interview_mode
                               ? 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100'
                               : schedule.is_candidate_mode
@@ -842,11 +894,11 @@ export default function DashboardPage() {
                               : 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
                           }`}
                         >
-                          {schedule.is_interview_mode ? '候補日受取リンクをコピー' : schedule.is_candidate_mode ? '候補時間提示リンクをコピー' : '通常予約リンクをコピー'}
+                          {schedule.is_interview_mode ? '候補日受取' : schedule.is_candidate_mode ? '候補時間' : '通常予約'}
                         </button>
                         <button
                           onClick={() => deleteSchedule(schedule.id)}
-                          className="px-3 py-2 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-white hover:bg-red-50 whitespace-nowrap"
+                          className="flex-1 sm:flex-initial px-3 py-2 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-white hover:bg-red-50 whitespace-nowrap"
                         >
                           削除
                         </button>
