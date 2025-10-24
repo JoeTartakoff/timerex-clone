@@ -68,6 +68,13 @@ interface GuestResponse {
   created_at: string
 }
 
+// ⭐ Toast 타입 정의
+interface Toast {
+  id: string
+  message: string
+  type: 'blue' | 'yellow' | 'purple' | 'orange' | 'green'
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -84,9 +91,28 @@ export default function DashboardPage() {
   const [showFolderModal, setShowFolderModal] = useState(false)
   const [folderName, setFolderName] = useState('')
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null)
-  
-  // ⭐ 사이드바 열림/닫힘 상태
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+
+  // ⭐ Toast 상태
+  const [toasts, setToasts] = useState<Toast[]>([])
+
+  // ⭐ Toast 표시 함수
+  const showToast = (message: string, type: Toast['type']) => {
+    const id = Math.random().toString(36).substring(7)
+    const newToast: Toast = { id, message, type }
+    
+    setToasts(prev => [...prev, newToast])
+    
+    // 5초 후 자동 제거
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id))
+    }, 5000)
+  }
+
+  // ⭐ Toast 수동 제거 함수
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id))
+  }
 
   useEffect(() => {
     checkUser()
@@ -218,97 +244,110 @@ export default function DashboardPage() {
     router.push('/login')
   }
 
-const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
-  try {
-    // API 호출하여 토큰 생성
-    const response = await fetch('/api/one-time-token/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scheduleId })
-    })
+  const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
+    try {
+      const response = await fetch('/api/one-time-token/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduleId })
+      })
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(errorData.error || 'Token creation failed')
-    }
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Token creation failed')
+      }
 
-    const { token } = await response.json()
-    console.log('✅ One-time token created:', token)
+      const { token } = await response.json()
+      console.log('✅ One-time token created:', token)
 
-    // URL 생성
-    let url = `${window.location.origin}/book/${shareLink}`
-    
-    if (quickGuestInfo.name && quickGuestInfo.email) {
-      const encodedName = encodeURIComponent(quickGuestInfo.name)
-      const encodedEmail = encodeURIComponent(quickGuestInfo.email)
-      url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}?token=${token}`
-    } else {
-      url = `${window.location.origin}/book/${shareLink}?token=${token}`
+      let url = `${window.location.origin}/book/${shareLink}`
+      
+      if (quickGuestInfo.name && quickGuestInfo.email) {
+        const encodedName = encodeURIComponent(quickGuestInfo.name)
+        const encodedEmail = encodeURIComponent(quickGuestInfo.email)
+        url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}?token=${token}`
+      } else {
+        url = `${window.location.origin}/book/${shareLink}?token=${token}`
+      }
+      
+      navigator.clipboard.writeText(url)
+      
+      // ⭐ Toast 표시
+      if (quickGuestInfo.name && quickGuestInfo.email) {
+        showToast(
+          `${quickGuestInfo.name}様専用ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n有効期限：24時間`,
+          'yellow'
+        )
+      } else {
+        showToast(
+          'ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n有効期限：24時間',
+          'yellow'
+        )
+      }
+    } catch (error) {
+      console.error('❌ Error creating one-time link:', error)
+      showToast('ワンタイムリンクの生成に失敗しました', 'yellow')
     }
-    
-    navigator.clipboard.writeText(url)
-    
-    if (quickGuestInfo.name && quickGuestInfo.email) {
-      alert(`${quickGuestInfo.name}様専用ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n\n有効期限：24時間`)
-    } else {
-      alert('ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n\n有効期限：24時間')
-    }
-  } catch (error) {
-    console.error('❌ Error creating one-time link:', error)
-    alert('ワンタイムリンクの生成に失敗しました')
   }
-}
 
   const copyFixedLink = (shareLink: string, isCandidateMode: boolean, isInterviewMode: boolean) => {
     let url
+    let toastType: Toast['type'] = 'blue'
+    let message = ''
     
     if (isInterviewMode) {
+      toastType = 'orange'
       url = `${window.location.origin}/interview/${shareLink}`
       
       if (quickGuestInfo.name && quickGuestInfo.email) {
         const encodedName = encodeURIComponent(quickGuestInfo.name)
         const encodedEmail = encodeURIComponent(quickGuestInfo.email)
         url = `${window.location.origin}/interview/${shareLink}?name=${encodedName}&email=${encodedEmail}`
+        message = `${quickGuestInfo.name}様専用候補日受取リンクをコピーしました！\nゲストが自由に候補時間を提案できます。`
+      } else {
+        message = '候補日受取リンクをコピーしました！\nゲストが自由に候補時間を提案できます。'
       }
     } else if (isCandidateMode) {
+      toastType = 'purple'
       url = `${window.location.origin}/candidate/${shareLink}`
       
       if (quickGuestInfo.name && quickGuestInfo.email) {
         const encodedName = encodeURIComponent(quickGuestInfo.name)
         const encodedEmail = encodeURIComponent(quickGuestInfo.email)
         url = `${window.location.origin}/candidate/${shareLink}?name=${encodedName}&email=${encodedEmail}`
+        message = `${quickGuestInfo.name}様専用候補時間提示リンクをコピーしました！\nゲストは複数の候補から選択できます。`
+      } else {
+        message = '候補時間提示リンクをコピーしました！\nゲストは複数の候補から選択できます。'
       }
     } else {
+      toastType = 'blue'
       url = `${window.location.origin}/book/${shareLink}`
       
       if (quickGuestInfo.name && quickGuestInfo.email) {
         const encodedName = encodeURIComponent(quickGuestInfo.name)
         const encodedEmail = encodeURIComponent(quickGuestInfo.email)
         url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}`
+        message = `${quickGuestInfo.name}様専用通常予約リンクをコピーしました！\n何度でも予約可能なリンクです。`
+      } else {
+        message = '通常予約リンクをコピーしました！\n何度でも予約可能なリンクです。'
       }
     }
     
     navigator.clipboard.writeText(url)
     
-    if (isInterviewMode && quickGuestInfo.name && quickGuestInfo.email) {
-      alert(`${quickGuestInfo.name}様専用候補日受取リンクをコピーしました！\nゲストが自由に候補時間を提案できます。`)
-    } else if (isInterviewMode) {
-      alert('候補日受取リンクをコピーしました！\nゲストが自由に候補時間を提案できます。')
-    } else if (isCandidateMode && quickGuestInfo.name && quickGuestInfo.email) {
-      alert(`${quickGuestInfo.name}様専用候補時間提示リンクをコピーしました！\nゲストは複数の候補から選択できます。`)
-    } else if (isCandidateMode) {
-      alert('候補時間提示リンクをコピーしました！\nゲストは複数の候補から選択できます。')
-    } else if (quickGuestInfo.name && quickGuestInfo.email) {
-      alert(`${quickGuestInfo.name}様専用通常予約リンクをコピーしました！\n何度でも予約可能なリンクです。`)
-    } else {
-      alert('通常予約リンクをコピーしました！\n何度でも予約可能なリンクです。')
-    }
+    // ⭐ Toast 표시
+    showToast(message, toastType)
   }
 
   const copyPersonalizedLink = (shareLink: string, guestToken: string, guestName: string) => {
     const url = `${window.location.origin}/book/${shareLink}?guest=${guestToken}`
     navigator.clipboard.writeText(url)
-    alert(`${guestName}様専用リンクをコピーしました！\n情報が自動入力されます。`)
+    
+    // ⭐ Toast 표시
+    showToast(
+      `${guestName}様専用リンクをコピーしました！\n情報が自動入力されます。`,
+      'green'
+    )
   }
 
   const confirmGuestResponse = async (responseId: string, slot: { date: string, startTime: string, endTime: string }, scheduleId: string) => {
@@ -496,9 +535,45 @@ const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
     ? schedules.filter(s => s.folder_id === selectedFolder)
     : schedules
 
+  // ⭐ Toast 배경색 설정
+  const getToastBgColor = (type: Toast['type']) => {
+    switch (type) {
+      case 'blue': return 'bg-blue-500'
+      case 'yellow': return 'bg-yellow-500'
+      case 'purple': return 'bg-purple-500'
+      case 'orange': return 'bg-orange-500'
+      case 'green': return 'bg-green-500'
+      default: return 'bg-blue-500'
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* ⭐ 모바일 오버레이 (사이드바 열렸을 때) */}
+      {/* ⭐ Toast 컨테이너 */}
+      <div className="fixed top-4 right-4 z-[9999] space-y-2">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`${getToastBgColor(toast.type)} text-white px-6 py-4 rounded-lg shadow-lg min-w-[300px] max-w-md animate-slide-down`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm font-medium whitespace-pre-line flex-1">
+                {toast.message}
+              </p>
+              <button
+                onClick={() => removeToast(toast.id)}
+                className="text-white hover:text-gray-200 transition-colors flex-shrink-0"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 모바일 오버레이 */}
       {isSidebarOpen && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
@@ -506,7 +581,7 @@ const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
         />
       )}
 
-      {/* ⭐ 왼쪽 사이드바 - 모바일에서는 슬라이드 */}
+      {/* 왼쪽 사이드바 */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-50
         w-64 bg-white shadow-lg flex flex-col
@@ -515,7 +590,6 @@ const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
       `}>
         <div className="p-6 border-b border-gray-200 flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">ヤクソクAI</h1>
-          {/* ⭐ 모바일 닫기 버튼 */}
           <button
             onClick={() => setIsSidebarOpen(false)}
             className="lg:hidden p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
@@ -674,9 +748,9 @@ const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
         </div>
       </aside>
 
-      {/* ⭐ 메인 컨텐츠 영역 */}
+      {/* 메인 컨텐츠 영역 */}
       <main className="flex-1 overflow-y-auto">
-        {/* ⭐ 모바일 헤더 (햄버거 버튼) */}
+        {/* 모바일 헤더 */}
         <div className="lg:hidden bg-white shadow-sm sticky top-0 z-30">
           <div className="flex items-center justify-between px-4 py-3">
             <button
@@ -897,12 +971,12 @@ const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
                           編集
                         </Link>
                         {!schedule.is_candidate_mode && !schedule.is_interview_mode && (
-<button
-  onClick={() => copyOneTimeLink(schedule.share_link, schedule.id)}
-  className="flex-1 sm:flex-initial px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
->
-  ワンタイム
-</button>
+                          <button
+                            onClick={() => copyOneTimeLink(schedule.share_link, schedule.id)}
+                            className="flex-1 sm:flex-initial px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
+                          >
+                            ワンタイム
+                          </button>
                         )}
                         <button
                           onClick={() => copyFixedLink(schedule.share_link, schedule.is_candidate_mode, schedule.is_interview_mode)}
@@ -970,6 +1044,24 @@ const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
           </div>
         </div>
       )}
+
+      {/* ⭐ 애니메이션 스타일 추가 */}
+      <style jsx global>{`
+        @keyframes slide-down {
+          from {
+            transform: translateY(-100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+
+        .animate-slide-down {
+          animation: slide-down 0.3s ease-out;
+        }
+      `}</style>
     </div>
   )
 }
