@@ -218,26 +218,46 @@ export default function DashboardPage() {
     router.push('/login')
   }
 
-  const copyOneTimeLink = (shareLink: string) => {
-    const oneTimeToken = crypto.randomUUID()
+const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
+  try {
+    // API 호출하여 토큰 생성
+    const response = await fetch('/api/one-time-token/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scheduleId })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || 'Token creation failed')
+    }
+
+    const { token } = await response.json()
+    console.log('✅ One-time token created:', token)
+
+    // URL 생성
     let url = `${window.location.origin}/book/${shareLink}`
     
     if (quickGuestInfo.name && quickGuestInfo.email) {
       const encodedName = encodeURIComponent(quickGuestInfo.name)
       const encodedEmail = encodeURIComponent(quickGuestInfo.email)
-      url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}?mode=onetime&token=${oneTimeToken}`
+      url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}?token=${token}`
     } else {
-      url = `${window.location.origin}/book/${shareLink}?mode=onetime&token=${oneTimeToken}`
+      url = `${window.location.origin}/book/${shareLink}?token=${token}`
     }
     
     navigator.clipboard.writeText(url)
     
     if (quickGuestInfo.name && quickGuestInfo.email) {
-      alert(`${quickGuestInfo.name}様専用ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。`)
+      alert(`${quickGuestInfo.name}様専用ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n\n有効期限：24時間`)
     } else {
-      alert('ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。')
+      alert('ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n\n有効期限：24時間')
     }
+  } catch (error) {
+    console.error('❌ Error creating one-time link:', error)
+    alert('ワンタイムリンクの生成に失敗しました')
   }
+}
 
   const copyFixedLink = (shareLink: string, isCandidateMode: boolean, isInterviewMode: boolean) => {
     let url
@@ -877,12 +897,12 @@ export default function DashboardPage() {
                           編集
                         </Link>
                         {!schedule.is_candidate_mode && !schedule.is_interview_mode && (
-                          <button
-                            onClick={() => copyOneTimeLink(schedule.share_link)}
-                            className="flex-1 sm:flex-initial px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
-                          >
-                            ワンタイム
-                          </button>
+<button
+  onClick={() => copyOneTimeLink(schedule.share_link, schedule.id)}
+  className="flex-1 sm:flex-initial px-3 py-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm font-medium text-yellow-700 hover:bg-yellow-100 whitespace-nowrap"
+>
+  ワンタイム
+</button>
                         )}
                         <button
                           onClick={() => copyFixedLink(schedule.share_link, schedule.is_candidate_mode, schedule.is_interview_mode)}

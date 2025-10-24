@@ -100,6 +100,10 @@ export default function BookingPage() {
   const [isPrefilledGuest, setIsPrefilledGuest] = useState(false)
   const [guestToken, setGuestToken] = useState<string | null>(null)
 
+  // ⭐ Step 4: 토큰 검증 상태 추가
+  const [tokenError, setTokenError] = useState<string | null>(null)
+  const [isValidToken, setIsValidToken] = useState<boolean>(true)
+
   // ⭐ 3일 뷰를 위한 시작 날짜 (기본값: 오늘)
   const [startDate, setStartDate] = useState<Date>(new Date())
 
@@ -220,80 +224,99 @@ export default function BookingPage() {
   }
 
   useEffect(() => {
-    if (initRef.current) return
-    initRef.current = true
+    const initPage = async () => {
+      if (initRef.current) return
+      initRef.current = true
 
-    console.log('🎬 Initial load')
+      console.log('🎬 Initial load')
 
-    const urlParams = new URLSearchParams(window.location.search)
-    const mode = urlParams.get('mode')
-    const token = urlParams.get('token')
-    const guestParam = urlParams.get('guest')
-    
-    if (guestParam) {
-      console.log('👤 Guest token detected:', guestParam)
-      setGuestToken(guestParam)
-      fetchGuestPreset(guestParam)
-    }
-    
-    if (mode === 'onetime' && token) {
-      setIsOneTimeMode(true)
-      setOneTimeToken(token)
-      console.log('🔒 One-time mode activated:', token)
-      
-      const checkToken = async () => {
-        const { data } = await supabase
-          .from('bookings')
-          .select('id')
-          .eq('one_time_token', token)
-          .maybeSingle()
+      // ⭐ Step 4: URL에서 token 파라미터 확인
+      const urlParams = new URLSearchParams(window.location.search)
+      const token = urlParams.get('token')
+      const mode = urlParams.get('mode')
+      const guestParam = urlParams.get('guest')
 
-        if (data) {
-          console.log('⚠️ Token already used')
-          setTokenAlreadyUsed(true)
-        }
-      }
-      checkToken()
-    }
-
-    const init = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser()
+      // ⭐ Step 4: 원타임 토큰 검증
+      if (token) {
+        console.log('🔍 Verifying one-time token:', token)
         
-        if (user) {
-          console.log('👤 User logged in:', user.email)
-          setGuestUser(user as User)
-          
-          if (!guestParam) {
-            setGuestInfo({
-              name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
-              email: user.email || '',
-            })
+        try {
+          const response = await fetch('/api/one-time-token/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+          })
+
+          const result = await response.json()
+
+          if (!result.valid) {
+            console.log('❌ Token invalid:', result.message)
+            setTokenError(result.message)
+            setIsValidToken(false)
+            setLoading(false)
+            return
           }
-          
-          const { data: { session } } = await supabase.auth.getSession()
-          if (session?.provider_token && session?.provider_refresh_token) {
-            await supabase.from('user_tokens').upsert({
-              user_id: user.id,
-              access_token: session.provider_token,
-              refresh_token: session.provider_refresh_token,
-              expires_at: new Date(Date.now() + (session.expires_in || 3600) * 1000).toISOString(),
-              updated_at: new Date().toISOString(),
-            }, { onConflict: 'user_id' })
-          }
-          
-          await fetchScheduleData(user.id)
-        } else {
-          console.log('👤 No user logged in')
-          await fetchScheduleData()
+
+          console.log('✅ Token valid')
+          setIsValidToken(true)
+          setIsOneTimeMode(true)
+          setOneTimeToken(token)
+        } catch (error) {
+          console.error('❌ Token verification error:', error)
+          setTokenError('トークンの検証に失敗しました')
+          setIsValidToken(false)
+          setLoading(false)
+          return
         }
-      } catch (error) {
-        console.error('❌ Init error:', error)
-        setLoading(false)
       }
+      
+      if (guestParam) {
+        console.log('👤 Guest token detected:', guestParam)
+        setGuestToken(guestParam)
+        fetchGuestPreset(guestParam)
+      }
+
+      const init = async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          
+          if (user) {
+            console.log('👤 User logged in:', user.email)
+            setGuestUser(user as User)
+            
+            if (!guestParam) {
+              setGuestInfo({
+                name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+                email: user.email || '',
+              })
+            }
+            
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session?.provider_token && session?.provider_refresh_token) {
+              await supabase.from('user_tokens').upsert({
+                user_id: user.id,
+                access_token: session.provider_token,
+                refresh_token: session.provider_refresh_token,
+                expires_at: new Date(Date.now() + (session.expires_in || 3600) * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'user_id' })
+            }
+            
+            await fetchScheduleData(user.id)
+          } else {
+            console.log('👤 No user logged in')
+            await fetchScheduleData()
+          }
+        } catch (error) {
+          console.error('❌ Init error:', error)
+          setLoading(false)
+        }
+      }
+
+      init()
     }
 
-    init()
+    initPage()
   }, [shareLink])
 
   useEffect(() => {
@@ -478,99 +501,108 @@ export default function BookingPage() {
     setSelectedBlock(null)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedBlock || !schedule) return
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  if (!selectedBlock || !schedule) return
 
-    console.log('🚀 BOOKING SUBMISSION')
-    console.log('One-time mode:', isOneTimeMode)
-    console.log('Token:', oneTimeToken)
+  console.log('🚀 BOOKING SUBMISSION')
+  console.log('One-time mode:', isOneTimeMode)
+  console.log('Token:', oneTimeToken)
 
-    if (submitting) {
-      console.log('⚠️ Already submitting')
-      return
+  if (submitting) {
+    console.log('⚠️ Already submitting')
+    return
+  }
+
+  setSubmitting(true)
+
+  try {
+    console.log('💾 Creating booking...')
+    const { error: bookingError } = await supabase
+      .from('bookings')
+      .insert({
+        schedule_id: schedule.id,
+        guest_name: guestInfo.name,
+        guest_email: guestInfo.email,
+        booking_date: selectedBlock.date,
+        start_time: selectedBlock.startTime,
+        end_time: selectedBlock.endTime,
+        status: 'confirmed',
+      })
+
+    if (bookingError) {
+      console.error('❌ Booking error:', bookingError)
+      throw bookingError
     }
 
-    setSubmitting(true)
+    console.log('✅ Booking created')
 
     try {
-      if (isOneTimeMode && oneTimeToken) {
-        console.log('🔍 Re-checking token...')
-        
-        const { data: existingBooking } = await supabase
-          .from('bookings')
-          .select('id')
-          .eq('one_time_token', oneTimeToken)
-          .maybeSingle()
-
-        if (existingBooking) {
-          console.log('❌ Token already used')
-          alert('このリンクは既に使用されました。\n他の方が先に予約を完了しました。')
-          setTimeout(() => window.location.reload(), 1000)
-          return
-        }
-
-        console.log('✅ Token available')
+      console.log('📅 Adding to calendar...')
+      const response = await fetch('/api/calendar/add-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scheduleId: schedule.id,
+          bookingDate: selectedBlock.date,
+          startTime: selectedBlock.startTime,
+          endTime: selectedBlock.endTime,
+          guestName: guestInfo.name,
+          guestEmail: guestInfo.email,
+          guestUserId: guestUser?.id,
+        }),
+      })
+      
+      if (response.ok) {
+        console.log('✅ Calendar event created')
+      } else {
+        console.log('⚠️ Calendar failed, but booking saved')
       }
+    } catch (calendarError) {
+      console.error('⚠️ Calendar error:', calendarError)
+    }
 
-      console.log('💾 Creating booking...')
-      const { error: bookingError } = await supabase
-        .from('bookings')
-        .insert({
-          schedule_id: schedule.id,
-          guest_name: guestInfo.name,
-          guest_email: guestInfo.email,
-          booking_date: selectedBlock.date,
-          start_time: selectedBlock.startTime,
-          end_time: selectedBlock.endTime,
-          status: 'confirmed',
-          is_one_time_booking: isOneTimeMode,
-          one_time_token: isOneTimeMode ? oneTimeToken : null,
-        })
-
-      if (bookingError) {
-        console.error('❌ Booking error:', bookingError)
-        throw bookingError
-      }
-
-      console.log('✅ Booking created')
-
+    // ⭐ 원타임 토큰 사용 처리
+    if (oneTimeToken) {
+      console.log('🔒 Marking token as used:', oneTimeToken)
+      
       try {
-        console.log('📅 Adding to calendar...')
-        const response = await fetch('/api/calendar/add-event', {
+        await fetch('/api/one-time-token/use', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            scheduleId: schedule.id,
-            bookingDate: selectedBlock.date,
-            startTime: selectedBlock.startTime,
-            endTime: selectedBlock.endTime,
-            guestName: guestInfo.name,
-            guestEmail: guestInfo.email,
-            guestUserId: guestUser?.id,
-          }),
+          body: JSON.stringify({ token: oneTimeToken })
         })
-        
-        if (response.ok) {
-          console.log('✅ Calendar event created')
-          alert('予約が完了しました！\nカレンダーに追加されました。')
-        } else {
-          console.log('⚠️ Calendar failed, but booking saved')
-          alert('予約が完了しました！\n（カレンダーへの追加は失敗しましたが、予約は保存されています）')
-        }
-      } catch (calendarError) {
-        console.error('⚠️ Calendar error:', calendarError)
-        alert('予約が完了しました！\n（カレンダーへの追加は失敗しましたが、予約は保存されています）')
+        console.log('✅ Token marked as used')
+      } catch (error) {
+        console.error('⚠️ Failed to mark token as used:', error)
       }
-      
-      setTimeout(() => window.location.reload(), 1500)
-    } catch (error) {
-      console.error('❌ Submit error:', error)
-      alert('予約に失敗しました')
-    } finally {
-      setSubmitting(false)
     }
+
+    // ⭐ 예약 완료 알림 (상세 정보 포함)
+    const bookingDate = new Date(selectedBlock.date).toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'long'
+    })
+
+    alert(
+      `予約が完了しました！\n\n` +
+      `📅 日時：${bookingDate}\n` +
+      `🕐 時間：${selectedBlock.startTime.slice(0, 5)} - ${selectedBlock.endTime.slice(0, 5)}\n` +
+      `👤 名前：${guestInfo.name}\n` +
+      `📧 メール：${guestInfo.email}\n\n` +
+      `カレンダーに追加されました。`
+    )
+    
+    setTimeout(() => window.location.reload(), 1500)
+  } catch (error) {
+    console.error('❌ Submit error:', error)
+    alert('予約に失敗しました')
+  } finally {
+    setSubmitting(false)
   }
+}
 
   // ⭐ 이전 3일로 이동
   const goToPrev3Days = () => {
@@ -618,6 +650,24 @@ export default function BookingPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <p className="text-gray-600">読み込み中...</p>
+      </div>
+    )
+  }
+
+  // ⭐ Step 4: 토큰 에러 화면
+  if (tokenError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-8 text-center">
+          <div className="text-6xl mb-4">❌</div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            アクセスできません
+          </h1>
+          <p className="text-gray-600 mb-4">{tokenError}</p>
+          <p className="text-sm text-gray-500">
+            新しいリンクをホストに依頼してください。
+          </p>
+        </div>
       </div>
     )
   }
@@ -895,7 +945,7 @@ export default function BookingPage() {
               <table className="w-full border-collapse select-none">
                 <thead>
                   <tr>
-                    <th className="border border-gray-200 bg-gray-50 p-2 text-xs font-medium text-gray-500 w-20">
+                    <th className="border border-gray-300 bg-gray-50 p-2 text-xs font-medium text-gray-500 w-20">
                       時間
                     </th>
                     {displayDates.map((date, idx) => {
@@ -903,7 +953,7 @@ export default function BookingPage() {
                       const isToday = date.toISOString().split('T')[0] === today.toISOString().split('T')[0]
                       
                       return (
-                        <th key={idx} className="border border-gray-200 bg-gray-50 p-2 text-sm font-medium text-gray-900">
+                        <th key={idx} className="border border-gray-300 bg-gray-50 p-2 text-sm font-medium text-gray-900">
                           <div>
                             {date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
                           </div>
@@ -920,103 +970,105 @@ export default function BookingPage() {
                   {hourSlots.map((hour) => {
                     return (
                       <tr key={hour}>
-                        <td className="border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
+                        <td className="border border-gray-300 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
                           {String(hour).padStart(2, '0')}:00
                         </td>
-{displayDates.map((date, dateIdx) => {
-  const dateStr = date.toISOString().split('T')[0]
-  
-  const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
-  const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
-  const isFirstHalfAvailable = isHalfHourAvailable(dateStr, firstHalfTime)
-  const isSecondHalfAvailable = isHalfHourAvailable(dateStr, secondHalfTime)
-  
-  const blockStartHour = selectedBlock ? Math.floor(timeToMinutes(selectedBlock.startTime) / 60) : -1
-  const isBlockStart = selectedBlock && 
-                       selectedBlock.date === dateStr && 
-                       blockStartHour === hour
-  
-  const blockTopPosition = selectedBlock && isBlockStart
-    ? timeToPixelPosition(selectedBlock.startTime) - (blockStartHour - 9) * 96
-    : 0
+                        {displayDates.map((date, dateIdx) => {
+                          const dateStr = date.toISOString().split('T')[0]
+                          
+                          const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
+                          const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
+                          const isFirstHalfAvailable = isHalfHourAvailable(dateStr, firstHalfTime)
+                          const isSecondHalfAvailable = isHalfHourAvailable(dateStr, secondHalfTime)
+                          
+                          const blockStartHour = selectedBlock ? Math.floor(timeToMinutes(selectedBlock.startTime) / 60) : -1
+                          const isBlockStart = selectedBlock && 
+                                               selectedBlock.date === dateStr && 
+                                               blockStartHour === hour
+                          
+                          const blockTopPosition = selectedBlock && isBlockStart
+                            ? timeToPixelPosition(selectedBlock.startTime) - (blockStartHour - 9) * 96
+                            : 0
 
-  return (
-    <td 
-      key={dateIdx} 
-      className="border border-gray-300 p-0 relative"
-      style={{ height: '96px' }}
-      onClick={(e) => handleCellClick(dateStr, hour, e)}
-    >
-      {/* ⭐ 위쪽 절반 (00분) */}
-      <div 
-        className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
-          isFirstHalfAvailable 
-            ? 'hover:bg-blue-50' 
-            : 'bg-gray-200 cursor-not-allowed'
-        }`}
-        style={{ height: '48px' }}
-      >
-        {/* ⭐ 예약 불가 문구 */}
-        {!isFirstHalfAvailable && (
-          <div className="flex items-center justify-center h-full">
-<span className="text-xs text-gray-400 font-medium opacity-80">予約不可</span>          </div>
-        )}
-      </div>
-      
-      {/* 30분 구분선 (점선) */}
-      <div 
-        className="absolute left-0 right-0 border-t border-dashed border-gray-300 pointer-events-none z-10" 
-        style={{ top: '48px' }} 
-      />
-      
-      {/* ⭐ 아래쪽 절반 (30분) */}
-      <div 
-        className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
-          isSecondHalfAvailable 
-            ? 'hover:bg-blue-50' 
-            : 'bg-gray-200 cursor-not-allowed'
-        }`}
-        style={{ height: '48px' }}
-      >
-        {/* ⭐ 예약 불가 문구 */}
-        {!isSecondHalfAvailable && (
-          <div className="flex items-center justify-center h-full">
-<span className="text-xs text-gray-400 font-medium opacity-80">予約不可</span>          </div>
-        )}
-      </div>
-      
-      {/* 선택된 박스 */}
-      {isBlockStart && (
-        <div
-          className={`absolute left-1 right-1 bg-blue-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-20 ${
-            isDragging ? 'cursor-grabbing' : 'cursor-move'
-          }`}
-          style={{
-            top: `${blockTopPosition}px`,
-            height: `${blockHeightPx}px`
-          }}
-          onMouseDown={handleBlockMouseDown}
-        >
-          <div className="text-center relative w-full">
-            <div>{selectedBlock.startTime.slice(0, 5)} - {selectedBlock.endTime.slice(0, 5)}</div>
-            <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
-            
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                cancelSelection()
-              }}
-              className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md z-30"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-    </td>
-  )
-})}
+                          return (
+                            <td 
+                              key={dateIdx} 
+                              className="border border-gray-300 p-0 relative"
+                              style={{ height: '96px' }}
+                              onClick={(e) => handleCellClick(dateStr, hour, e)}
+                            >
+                              {/* ⭐ 위쪽 절반 (00분) */}
+                              <div 
+                                className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
+                                  isFirstHalfAvailable 
+                                    ? 'hover:bg-blue-50' 
+                                    : 'bg-gray-200 cursor-not-allowed'
+                                }`}
+                                style={{ height: '48px' }}
+                              >
+                                {/* ⭐ 예약 불가 문구 */}
+                                {!isFirstHalfAvailable && (
+                                  <div className="flex items-center justify-center h-full">
+                                    <span className="text-xs text-gray-400 font-medium opacity-80">予約不可</span>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {/* 30분 구분선 (점선) */}
+                              <div 
+                                className="absolute left-0 right-0 border-t border-dashed border-gray-300 pointer-events-none z-10" 
+                                style={{ top: '48px' }} 
+                              />
+                              
+                              {/* ⭐ 아래쪽 절반 (30분) */}
+                              <div 
+                                className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
+                                  isSecondHalfAvailable 
+                                    ? 'hover:bg-blue-50' 
+                                    : 'bg-gray-200 cursor-not-allowed'
+                                }`}
+                                style={{ height: '48px' }}
+                              >
+                                {/* ⭐ 예약 불가 문구 */}
+                                {!isSecondHalfAvailable && (
+                                  <div className="flex items-center justify-center h-full">
+                                    <span className="text-xs text-gray-400 font-medium opacity-80">予約不可</span>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {/* 선택된 박스 */}
+                              {isBlockStart && (
+                                <div
+                                  className={`absolute left-1 right-1 bg-blue-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-20 ${
+                                    isDragging ? 'cursor-grabbing' : 'cursor-move'
+                                  }`}
+                                  style={{
+                                    top: `${blockTopPosition}px`,
+                                    height: `${blockHeightPx}px`
+                                  }}
+                                  onMouseDown={handleBlockMouseDown}
+                                >
+                                  <div className="text-center relative w-full">
+                                    <div>{selectedBlock.startTime.slice(0, 5)} - {selectedBlock.endTime.slice(0, 5)}</div>
+                                    <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
+                                    
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        cancelSelection()
+                                      }}
+                                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md z-30"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                          )
+                        })}
                       </tr>
                     )
                   })}
