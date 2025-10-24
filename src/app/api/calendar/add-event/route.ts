@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { randomUUID } from 'crypto' 
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -39,21 +40,24 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
 
 async function addCalendarEvent(
   accessToken: string,
-  eventData: Record<string, unknown>
+  eventData: Record<string, unknown>,
+  conferenceDataVersion: number = 0
 ): Promise<Record<string, unknown>> {
   console.log('📅 Adding calendar event...')
+  console.log('🎥 Conference data version:', conferenceDataVersion)
   
-  const response = await fetch(
-    'https://www.googleapis.com/calendar/v3/calendars/primary/events',
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(eventData),
-    }
-  )
+  const url = conferenceDataVersion > 0
+    ? `https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=${conferenceDataVersion}`
+    : 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(eventData),
+  })
 
   console.log('📅 Calendar API response status:', response.status)
 
@@ -65,6 +69,11 @@ async function addCalendarEvent(
 
   const result = await response.json()
   console.log('✅ Calendar event created:', result.id)
+  
+  if (result.hangoutLink) {
+    console.log('🎥 Google Meet link:', result.hangoutLink)
+  }
+  
   return result
 }
 
@@ -287,11 +296,13 @@ async function addEventToAllTeamMembers(
   assignedUserId: string,
   assignedUserEmail: string,
   eventData: Record<string, unknown>,
-  scheduleTitle: string
+  scheduleTitle: string,
+  conferenceDataVersion: number = 0
 ): Promise<string[]> {
   console.log('\n👥 === ADDING EVENT TO ALL TEAM MEMBERS ===')
   console.log(`Team ID: ${teamId}`)
   console.log(`Assigned user: ${assignedUserEmail}`)
+  console.log('🎥 Conference data version:', conferenceDataVersion)
   
   try {
     const { data: members } = await supabaseAdmin
@@ -356,7 +367,7 @@ async function addEventToAllTeamMembers(
           description: `담당자: ${assignedUserEmail}\n\n${eventData.description || ''}`
         }
 
-        const event = await addCalendarEvent(accessToken, teamEventData)
+        const event = await addCalendarEvent(accessToken, teamEventData, conferenceDataVersion)
         const eventId = (event as { id: string }).id
         
         eventIds.push(eventId)
@@ -385,16 +396,23 @@ async function addEventToAllTeamMembers(
 }
 
 export async function POST(request: Request) {
+  console.log('\n\n🚨 ============================================')
+  console.log('🚨 ADD EVENT API CALLED!')
+  console.log('🚨 ============================================\n')
+  
   try {
-    const { scheduleId, bookingDate, startTime, endTime, guestName, guestEmail, guestUserId } = await request.json()
+    const body = await request.json()
+    console.log('📦 Request body:', JSON.stringify(body, null, 2))
 
-    console.log('=== ADD EVENT API START ===')
+    const { scheduleId, bookingDate, startTime, endTime, guestName, guestEmail, guestUserId } = body
+
+    console.log('\n=== ADD EVENT API START ===')
     console.log('📋 Request:', { scheduleId, bookingDate, startTime, endTime, guestName, guestEmail })
     console.log('👤 Guest User ID:', guestUserId || 'Not logged in')
 
     const { data: schedule, error: scheduleError } = await supabaseAdmin
       .from('schedules')
-      .select('title, user_id, team_id, assignment_method')
+      .select('title, user_id, team_id, assignment_method, create_meet_link')
       .eq('id', scheduleId)
       .single()
 
@@ -406,14 +424,14 @@ export async function POST(request: Request) {
     console.log('✅ Schedule found:', schedule.title)
     console.log('📊 Schedule type:', schedule.team_id ? 'Team' : 'Individual')
     console.log('📊 Assignment method:', schedule.assignment_method || 'N/A')
+    console.log('🎥 Create Meet link:', schedule.create_meet_link || false)
 
     const [startHour, startMin] = startTime.split(':')
     const [endHour, endMin] = endTime.split(':')
     const startDateTime = `${bookingDate}T${startHour.padStart(2, '0')}:${startMin.padStart(2, '0')}:00`
     const endDateTime = `${bookingDate}T${endHour.padStart(2, '0')}:${endMin.padStart(2, '0')}:00`
 
-    // ⭐ baseEventData → hostEventData로 변경
-    const hostEventData = {
+    const hostEventData: Record<string, unknown> = {
       summary: `${schedule.title} - ${guestName}`,
       description: `予約者: ${guestName}\nメール: ${guestEmail}`,
       start: {
@@ -424,7 +442,7 @@ export async function POST(request: Request) {
         dateTime: endDateTime,
         timeZone: 'Asia/Tokyo',
       },
-      attendees: guestUserId ? [] : [{ email: guestEmail }],  // ⭐ 조건부 변경
+      attendees: [{ email: guestEmail }],  // ⭐ 항상 게스트 추가
       reminders: {
         useDefault: false,
         overrides: [
@@ -433,6 +451,20 @@ export async function POST(request: Request) {
         ],
       },
     }
+
+    if (schedule.create_meet_link) {
+      console.log('🎥 Adding Google Meet conference data...')
+      hostEventData.conferenceData = {
+        createRequest: {
+          requestId: randomUUID(),
+          conferenceSolutionKey: {
+            type: 'hangoutsMeet'
+          }
+        }
+      }
+    }
+
+    const conferenceDataVersion = schedule.create_meet_link ? 1 : 0
 
     let assignedUserId = schedule.user_id
     let assignedUserEmail = ''
@@ -473,8 +505,9 @@ export async function POST(request: Request) {
         schedule.team_id,
         assignedUserId,
         assignedUserEmail,
-        hostEventData,  // ⭐ 변경
-        schedule.title
+        hostEventData,
+        schedule.title,
+        conferenceDataVersion
       )
 
       if (hostEventIds.length === 0) {
@@ -528,80 +561,24 @@ export async function POST(request: Request) {
       }
 
       console.log('📅 Adding event to host calendar...')
-      const hostEvent = await addCalendarEvent(hostAccessToken, hostEventData)  // ⭐ 변경
+      const hostEvent = await addCalendarEvent(hostAccessToken, hostEventData, conferenceDataVersion)
       hostEventIds = [(hostEvent as { id: string }).id]
       console.log('✅ Host event created:', hostEventIds[0])
     }
 
+    // ⭐⭐⭐ 게스트 이벤트 로직 완전 제거! ⭐⭐⭐
     let guestEventId: string | null = null
     
     if (guestUserId) {
       console.log('\n👤 === GUEST CALENDAR ===')
-      console.log('Guest is logged in, adding to guest calendar...')
-      
-      const { data: guestTokens } = await supabaseAdmin
-        .from('user_tokens')
-        .select('*')
-        .eq('user_id', guestUserId)
-        .maybeSingle()
-
-      if (guestTokens) {
-        console.log('✅ Guest tokens found')
-        
-        let guestAccessToken = guestTokens.access_token
-        const guestExpiresAt = new Date(guestTokens.expires_at)
-        
-        if (guestExpiresAt < new Date()) {
-          console.log('🔄 Guest token expired, refreshing...')
-          const newToken = await refreshAccessToken(guestTokens.refresh_token)
-          if (newToken) {
-            guestAccessToken = newToken
-            await supabaseAdmin
-              .from('user_tokens')
-              .update({
-                access_token: newToken,
-                expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
-                updated_at: new Date().toISOString(),
-              })
-              .eq('user_id', guestUserId)
-          }
-        }
-
-        // ⭐ 게스트 전용 이벤트 데이터 (독립적)
-        const guestEventData = {
-          summary: `${schedule.title}`,
-          description: schedule.team_id 
-            ? `チームとの予定\n担当者: ${assignedUserEmail}`
-            : `ホストとの予定`,
-          start: {
-            dateTime: startDateTime,
-            timeZone: 'Asia/Tokyo',
-          },
-          end: {
-            dateTime: endDateTime,
-            timeZone: 'Asia/Tokyo',
-          },
-          attendees: [],  // ⭐ attendees 없음!
-          reminders: {
-            useDefault: false,
-            overrides: [
-              { method: 'email', minutes: 24 * 60 },
-              { method: 'popup', minutes: 30 },
-            ],
-          },
-        }
-
-        try {
-          console.log('📅 Adding event to guest calendar...')
-          const guestEvent = await addCalendarEvent(guestAccessToken, guestEventData)
-          guestEventId = (guestEvent as { id: string }).id
-          console.log('✅ Guest event created:', guestEventId)
-        } catch (error) {
-          console.error('⚠️ Failed to add event to guest calendar:', error)
-        }
-      } else {
-        console.log('⚠️ Guest tokens not found')
+      console.log('✅ Guest is logged in')
+      console.log('📧 Guest will receive calendar invitation from host')
+      console.log('📧 Invitation email will be sent to:', guestEmail)
+      if (schedule.create_meet_link) {
+        console.log('🎥 Meet link will be included in the invitation')
       }
+      // ⭐ 게스트 이벤트 생성 안 함!
+      // 호스트 초대로 자동 처리됨
     }
 
     console.log('\n💾 === UPDATING DATABASE ===')
@@ -635,7 +612,7 @@ export async function POST(request: Request) {
       } else {
         console.log('✅ Successfully updated booking')
         console.log('   Host event ID:', hostEventIds[0])
-        console.log('   Guest event ID:', guestEventId || 'N/A')
+        console.log('   Guest event ID:', guestEventId || 'N/A (invitation only)')
         console.log('   Assigned user:', assignedUserId)
       }
     }
@@ -650,20 +627,26 @@ export async function POST(request: Request) {
       assignedUserEmail: schedule.team_id ? assignedUserEmail : undefined,
       isTeamSchedule: !!schedule.team_id,
       teamMembersCount: schedule.team_id ? hostEventIds.length : undefined,
+      hasMeetLink: schedule.create_meet_link || false,
     })
     
   } catch (error: unknown) {
     console.error('\n=== ADD EVENT API ERROR ===')
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('Error:', errorMessage)
-    if (error instanceof Error && error.stack) {
+    console.error('Error type:', typeof error)
+    console.error('Error:', error)
+    
+    if (error instanceof Error) {
+      console.error('Message:', error.message)
       console.error('Stack:', error.stack)
+    } else {
+      console.error('Unknown error type:', JSON.stringify(error))
     }
     
     return NextResponse.json(
       { 
         success: false,
-        error: errorMessage 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        details: error instanceof Error ? error.stack : String(error)
       },
       { status: 500 }
     )
