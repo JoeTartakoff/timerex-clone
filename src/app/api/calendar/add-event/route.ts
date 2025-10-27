@@ -631,7 +631,7 @@ const { data: hostUser } = await supabaseAdmin
   .eq('id', assignedUserId)
   .single()
 
-const hostName = hostUser?.name || 'ホスト'
+const hostName = hostUser?.name || hostUser?.email?.split('@')[0] || 'ホスト'
 const hostEmail = hostUser?.email || ''
 
 // Meet 링크 추출 (있는 경우)
