@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto' 
+import { sendBookingNotifications } from '@/lib/sendgrid'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -617,7 +618,76 @@ export async function POST(request: Request) {
       }
     }
 
-    console.log('\n=== ADD EVENT API COMPLETED SUCCESSFULLY ===\n')
+
+
+
+// ⭐⭐⭐ 메일 발송 추가 ⭐⭐⭐
+console.log('\n📧 === SENDING EMAIL NOTIFICATIONS ===')
+
+// 호스트 정보 조회
+const { data: hostUser } = await supabaseAdmin
+  .from('users')
+  .select('name, email')
+  .eq('id', assignedUserId)
+  .single()
+
+const hostName = hostUser?.name || 'ホスト'
+const hostEmail = hostUser?.email || ''
+
+// Meet 링크 추출 (있는 경우)
+let meetLink: string | undefined = undefined
+if (schedule.create_meet_link && hostEventIds.length > 0) {
+  try {
+    const { data: hostTokens } = await supabaseAdmin
+      .from('user_tokens')
+      .select('access_token')
+      .eq('user_id', assignedUserId)
+      .single()
+
+    if (hostTokens) {
+      const eventResponse = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${hostEventIds[0]}`,
+        {
+          headers: { 'Authorization': `Bearer ${hostTokens.access_token}` }
+        }
+      )
+
+      if (eventResponse.ok) {
+        const eventData = await eventResponse.json()
+        meetLink = eventData.hangoutLink
+        console.log('🎥 Meet link extracted:', meetLink)
+      }
+    }
+  } catch (error) {
+    console.error('⚠️ Failed to extract Meet link:', error)
+  }
+}
+
+// 메일 발송
+try {
+  const emailResult = await sendBookingNotifications({
+    scheduleTitle: schedule.title,
+    guestName,
+    guestEmail,
+    hostName,
+    hostEmail: hostEmail || 'gogumatruck@gmail.com',
+    bookingDate,
+    startTime,
+    endTime,
+    meetLink,
+    bookingMode: 'normal',
+  })
+
+  if (!emailResult.allSuccess) {
+    console.warn('⚠️ Some emails failed to send, but booking completed')
+  }
+} catch (emailError) {
+  console.error('⚠️ Email sending failed, but booking completed:', emailError)
+  // 메일 실패해도 예약은 완료되도록 계속 진행
+}
+
+console.log('\n=== ADD EVENT API COMPLETED SUCCESSFULLY ===\n')
+
 
     return NextResponse.json({ 
       success: true,
