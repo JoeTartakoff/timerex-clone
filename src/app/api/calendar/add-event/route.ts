@@ -5,7 +5,7 @@ import { sendBookingNotifications } from '@/lib/sendgrid'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
 async function refreshAccessToken(refreshToken: string): Promise<string | null> {
@@ -443,7 +443,7 @@ export async function POST(request: Request) {
         dateTime: endDateTime,
         timeZone: 'Asia/Tokyo',
       },
-      attendees: [{ email: guestEmail }],  // ⭐ 항상 게스트 추가
+      attendees: [{ email: guestEmail }],
       reminders: {
         useDefault: false,
         overrides: [
@@ -567,7 +567,6 @@ export async function POST(request: Request) {
       console.log('✅ Host event created:', hostEventIds[0])
     }
 
-    // ⭐⭐⭐ 게스트 이벤트 로직 완전 제거! ⭐⭐⭐
     let guestEventId: string | null = null
     
     if (guestUserId) {
@@ -578,8 +577,6 @@ export async function POST(request: Request) {
       if (schedule.create_meet_link) {
         console.log('🎥 Meet link will be included in the invitation')
       }
-      // ⭐ 게스트 이벤트 생성 안 함!
-      // 호스트 초대로 자동 처리됨
     }
 
     console.log('\n💾 === UPDATING DATABASE ===')
@@ -618,76 +615,97 @@ export async function POST(request: Request) {
       }
     }
 
+    // ⭐⭐⭐ 메일 발송 추가 ⭐⭐⭐
+    console.log('\n📧 === SENDING EMAIL NOTIFICATIONS ===')
 
+    // 호스트 정보 조회
+    let hostName = 'ホスト'
+    let hostEmail = ''
 
-
-// ⭐⭐⭐ 메일 발송 추가 ⭐⭐⭐
-console.log('\n📧 === SENDING EMAIL NOTIFICATIONS ===')
-
-// 호스트 정보 조회
-const { data: hostUser } = await supabaseAdmin
-  .from('users')
-  .select('name, email')
-  .eq('id', assignedUserId)
-  .single()
-
-const hostName = hostUser?.name || hostUser?.email?.split('@')[0] || 'ホスト'
-const hostEmail = hostUser?.email || ''
-
-// Meet 링크 추출 (있는 경우)
-let meetLink: string | undefined = undefined
-if (schedule.create_meet_link && hostEventIds.length > 0) {
-  try {
-    const { data: hostTokens } = await supabaseAdmin
-      .from('user_tokens')
-      .select('access_token')
-      .eq('user_id', assignedUserId)
-      .single()
-
-    if (hostTokens) {
-      const eventResponse = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${hostEventIds[0]}`,
-        {
-          headers: { 'Authorization': `Bearer ${hostTokens.access_token}` }
+    if (schedule.team_id) {
+      // 팀 스케줄: assignedUserEmail 이미 있음
+      hostEmail = assignedUserEmail
+      hostName = assignedUserEmail?.split('@')[0] || 'ホスト'
+      console.log('📧 Host info (from team):')
+      console.log('   Name:', hostName)
+      console.log('   Email:', hostEmail)
+    } else {
+      // 개인 스케줄: Supabase Auth에서 조회
+      try {
+        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.getUserById(assignedUserId)
+        
+        console.log('🔍 Auth user data:', authData?.user?.email)
+        
+        if (authData?.user?.email) {
+          hostEmail = authData.user.email
+          hostName = authData.user.user_metadata?.name || authData.user.email.split('@')[0]
+          console.log('📧 Host info (from auth):')
+          console.log('   Name:', hostName)
+          console.log('   Email:', hostEmail)
+        } else {
+          console.warn('⚠️ Could not fetch auth user, using fallback')
+          hostEmail = 'gogumatruck@gmail.com'
+          hostName = 'ホスト'
         }
-      )
-
-      if (eventResponse.ok) {
-        const eventData = await eventResponse.json()
-        meetLink = eventData.hangoutLink
-        console.log('🎥 Meet link extracted:', meetLink)
+      } catch (authError) {
+        console.error('❌ Error fetching auth user:', authError)
+        hostEmail = 'gogumatruck@gmail.com'
+        hostName = 'ホスト'
       }
     }
-  } catch (error) {
-    console.error('⚠️ Failed to extract Meet link:', error)
-  }
-}
 
-// 메일 발송
-try {
-  const emailResult = await sendBookingNotifications({
-    scheduleTitle: schedule.title,
-    guestName,
-    guestEmail,
-    hostName,
-    hostEmail: hostEmail || 'gogumatruck@gmail.com',
-    bookingDate,
-    startTime,
-    endTime,
-    meetLink,
-    bookingMode: 'normal',
-  })
+    // Meet 링크 추출 (있는 경우)
+    let meetLink: string | undefined = undefined
+    if (schedule.create_meet_link && hostEventIds.length > 0) {
+      try {
+        const { data: hostTokens } = await supabaseAdmin
+          .from('user_tokens')
+          .select('access_token')
+          .eq('user_id', assignedUserId)
+          .single()
 
-  if (!emailResult.allSuccess) {
-    console.warn('⚠️ Some emails failed to send, but booking completed')
-  }
-} catch (emailError) {
-  console.error('⚠️ Email sending failed, but booking completed:', emailError)
-  // 메일 실패해도 예약은 완료되도록 계속 진행
-}
+        if (hostTokens) {
+          const eventResponse = await fetch(
+            `https://www.googleapis.com/calendar/v3/calendars/primary/events/${hostEventIds[0]}`,
+            {
+              headers: { 'Authorization': `Bearer ${hostTokens.access_token}` }
+            }
+          )
 
-console.log('\n=== ADD EVENT API COMPLETED SUCCESSFULLY ===\n')
+          if (eventResponse.ok) {
+            const eventData = await eventResponse.json()
+            meetLink = eventData.hangoutLink
+            console.log('🎥 Meet link extracted:', meetLink)
+          }
+        }
+      } catch (error) {
+        console.error('⚠️ Failed to extract Meet link:', error)
+      }
+    }
 
+    // 메일 발송
+    try {
+      const emailResult = await sendBookingNotifications({
+        scheduleTitle: schedule.title,
+        guestName,
+        guestEmail,
+        hostName,
+        hostEmail,
+        bookingDate,
+        startTime,
+        endTime,
+        meetLink,
+        bookingMode: 'normal',
+      })
+
+      if (!emailResult.allSuccess) {
+        console.warn('⚠️ Some emails failed to send, but booking completed')
+      }
+    } catch (emailError) {
+      console.error('⚠️ Email sending failed, but booking completed:', emailError)
+    }
+
+    console.log('\n=== ADD EVENT API COMPLETED SUCCESSFULLY ===\n')
 
     return NextResponse.json({ 
       success: true,
