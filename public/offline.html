@@ -1,0 +1,118 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>オフライン - Yakusoku-AI</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      padding: 20px;
+    }
+    
+    .container {
+      text-align: center;
+      max-width: 500px;
+    }
+    
+    .icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    h1 {
+      font-size: 32px;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+    
+    p {
+      font-size: 18px;
+      line-height: 1.6;
+      opacity: 0.9;
+      margin-bottom: 32px;
+    }
+    
+    button {
+      background: white;
+      color: #667eea;
+      border: none;
+      padding: 12px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    button:active {
+      transform: translateY(0);
+    }
+    
+    .status {
+      margin-top: 24px;
+      font-size: 14px;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">📡</div>
+    <h1>オフラインです</h1>
+    <p>
+      インターネット接続が切断されています。<br>
+      接続が復旧したら自動的に再読み込みされます。
+    </p>
+    <button onclick="location.reload()">再読み込み</button>
+    <div class="status" id="status">接続を確認中...</div>
+  </div>
+  
+  <script>
+    // 接続 상태 확인
+    function updateStatus() {
+      const status = document.getElementById('status')
+      if (navigator.onLine) {
+        status.textContent = '接続が復旧しました！'
+        setTimeout(() => location.reload(), 1000)
+      } else {
+        status.textContent = 'オフライン状態です'
+      }
+    }
+    
+    // 이벤트 리스너
+    window.addEventListener('online', updateStatus)
+    window.addEventListener('offline', updateStatus)
+    
+    // 초기 상태 확인
+    updateStatus()
+    
+    // 5초마다 재확인
+    setInterval(updateStatus, 5000)
+  </script>
+</body>
+</html>
