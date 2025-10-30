@@ -38,7 +38,6 @@ interface TimeBlock {
   endTime: string
 }
 
-// ⭐ 3일 날짜 계산 (오늘/내일/모레)
 function getThreeDayDates(center: Date): Date[] {
   const dates: Date[] = []
   for (let i = 0; i <= 2; i++) {
@@ -54,7 +53,6 @@ function isDateInRange(date: Date, start: string, end: string): boolean {
   return dateStr >= start && dateStr <= end
 }
 
-// ⭐ 시간 계산 유틸리티
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number)
   return hours * 60 + minutes
@@ -66,17 +64,15 @@ function minutesToTime(minutes: number): string {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
 }
 
-// ⭐ 30분 단위로 스냅
 function snapToHalfHour(minutes: number): number {
   return Math.round(minutes / 30) * 30
 }
 
-// ⭐ 시간을 픽셀 위치로 변환 (09:00 = 0px, 1시간 = 96px, 30분 = 48px)
 function timeToPixelPosition(time: string): number {
   const minutes = timeToMinutes(time)
-  const baseMinutes = 9 * 60 // 09:00
+  const baseMinutes = 9 * 60
   const relativeMinutes = minutes - baseMinutes
-  return (relativeMinutes / 60) * 96 // 1시간당 96px
+  return (relativeMinutes / 60) * 96
 }
 
 export default function BookingPage() {
@@ -99,15 +95,9 @@ export default function BookingPage() {
   const [tokenAlreadyUsed, setTokenAlreadyUsed] = useState(false)
   const [isPrefilledGuest, setIsPrefilledGuest] = useState(false)
   const [guestToken, setGuestToken] = useState<string | null>(null)
-
-  // ⭐ Step 4: 토큰 검증 상태 추가
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [isValidToken, setIsValidToken] = useState<boolean>(true)
-
-  // ⭐ 3일 뷰를 위한 시작 날짜 (기본값: 오늘)
   const [startDate, setStartDate] = useState<Date>(new Date())
-
-  // ⭐ 드래그 상태
   const [isDragging, setIsDragging] = useState(false)
   const [dragStartY, setDragStartY] = useState(0)
   const [dragInitialTop, setDragInitialTop] = useState(0)
@@ -115,13 +105,10 @@ export default function BookingPage() {
   const initRef = useRef(false)
   const guestLoginProcessedRef = useRef(false)
 
-  const fetchScheduleData = async (guestUserId?: string) => {
+  // ⭐ 스케줄 정보만 먼저 로딩
+  const fetchScheduleInfo = async () => {
     try {
-      console.log('=== fetchScheduleData START ===')
-      console.log('shareLink:', shareLink)
-      console.log('guestUserId:', guestUserId)
-      
-      setIsLoadingSlots(true)
+      console.log('📋 Fetching schedule info...')
       
       const { data: scheduleData, error: scheduleError } = await supabase
         .from('schedules')
@@ -129,69 +116,77 @@ export default function BookingPage() {
         .eq('share_link', shareLink)
         .single()
 
-      console.log('Schedule found:', scheduleData?.title)
-
       if (scheduleError) throw scheduleError
 
+      console.log('✅ Schedule info loaded:', scheduleData.title)
       setSchedule(scheduleData)
+      setLoading(false) // ⭐ 여기서 먼저 로딩 해제!
 
       const today = new Date()
       setStartDate(today)
 
-      try {
-        console.log('📅 Fetching from Google Calendar API...')
-        
-        const response = await fetch('/api/calendar/get-available-slots', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            scheduleId: scheduleData.id,
-            guestUserId: guestUserId || null,
-          }),
-        })
+      return scheduleData
+    } catch (error) {
+      console.error('❌ Failed to load schedule:', error)
+      alert('スケジュールの読み込みに失敗しました')
+      setLoading(false)
+      return null
+    }
+  }
 
-        console.log('API response status:', response.status)
+  // ⭐ 캘린더 슬롯은 백그라운드에서 로딩
+  const fetchCalendarSlots = async (scheduleData: Schedule, guestUserId?: string) => {
+    try {
+      console.log('📅 Fetching calendar slots...')
+      setIsLoadingSlots(true)
 
-        if (response.ok) {
-          const result = await response.json()
-          console.log('API result:', result)
-          
-          if (result.success && result.slots && result.slots.length > 0) {
-            const slotsWithId = result.slots.map((slot: any, index: number) => ({
-              id: `${slot.date}-${slot.startTime}-${index}`,
-              date: slot.date,
-              start_time: slot.startTime,
-              end_time: slot.endTime,
-            }))
-            console.log('✅ Using Calendar API slots:', slotsWithId.length)
-            setAvailableSlots(slotsWithId)
-            return
-          }
-        }
-        
-        throw new Error('Calendar API failed')
-      } catch (apiError) {
-        console.log('⚠️ Calendar API failed, using static slots:', apiError)
-        
-        const { data: slotsData, error: slotsError } = await supabase
-          .from('availability_slots')
-          .select('*')
-          .eq('schedule_id', scheduleData.id)
-          .order('date', { ascending: true })
-          .order('start_time', { ascending: true })
+      const response = await fetch('/api/calendar/get-available-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scheduleId: scheduleData.id,
+          guestUserId: guestUserId || null,
+        }),
+      })
 
-        if (slotsError) {
-          console.error('❌ Failed to load static slots:', slotsError)
-        } else {
-          console.log('✅ Loaded static slots:', slotsData?.length || 0)
-          setAvailableSlots(slotsData || [])
+      console.log('API response status:', response.status)
+
+      if (response.ok) {
+        const result = await response.json()
+        console.log('API result:', result)
+        
+        if (result.success && result.slots && result.slots.length > 0) {
+          const slotsWithId = result.slots.map((slot: any, index: number) => ({
+            id: `${slot.date}-${slot.startTime}-${index}`,
+            date: slot.date,
+            start_time: slot.startTime,
+            end_time: slot.endTime,
+          }))
+          console.log('✅ Using Calendar API slots:', slotsWithId.length)
+          setAvailableSlots(slotsWithId)
+          setIsLoadingSlots(false)
+          return
         }
       }
-    } catch (error) {
-      console.error('❌ fetchScheduleData error:', error)
-      alert('スケジュールの読み込みに失敗しました')
-    } finally {
-      setLoading(false)
+      
+      throw new Error('Calendar API failed')
+    } catch (apiError) {
+      console.log('⚠️ Calendar API failed, using static slots:', apiError)
+      
+      const { data: slotsData, error: slotsError } = await supabase
+        .from('availability_slots')
+        .select('*')
+        .eq('schedule_id', scheduleData.id)
+        .order('date', { ascending: true })
+        .order('start_time', { ascending: true })
+
+      if (slotsError) {
+        console.error('❌ Failed to load static slots:', slotsError)
+      } else {
+        console.log('✅ Loaded static slots:', slotsData?.length || 0)
+        setAvailableSlots(slotsData || [])
+      }
+      
       setIsLoadingSlots(false)
     }
   }
@@ -230,13 +225,11 @@ export default function BookingPage() {
 
       console.log('🎬 Initial load')
 
-      // ⭐ Step 4: URL에서 token 파라미터 확인
       const urlParams = new URLSearchParams(window.location.search)
       const token = urlParams.get('token')
-      const mode = urlParams.get('mode')
       const guestParam = urlParams.get('guest')
 
-      // ⭐ Step 4: 원타임 토큰 검증
+      // ⭐ 원타임 토큰 검증
       if (token) {
         console.log('🔍 Verifying one-time token:', token)
         
@@ -278,6 +271,11 @@ export default function BookingPage() {
 
       const init = async () => {
         try {
+          // ⭐ 1단계: 스케줄 정보만 먼저 로딩
+          const scheduleData = await fetchScheduleInfo()
+          if (!scheduleData) return
+
+          // ⭐ 2단계: 사용자 정보 확인
           const { data: { user } } = await supabase.auth.getUser()
           
           if (user) {
@@ -302,10 +300,12 @@ export default function BookingPage() {
               }, { onConflict: 'user_id' })
             }
             
-            await fetchScheduleData(user.id)
+            // ⭐ 3단계: 캘린더 슬롯 백그라운드 로딩
+            fetchCalendarSlots(scheduleData, user.id)
           } else {
             console.log('👤 No user logged in')
-            await fetchScheduleData()
+            // ⭐ 3단계: 캘린더 슬롯 백그라운드 로딩
+            fetchCalendarSlots(scheduleData)
           }
         } catch (error) {
           console.error('❌ Init error:', error)
@@ -343,7 +343,9 @@ export default function BookingPage() {
           }, { onConflict: 'user_id' })
         }
 
-        await fetchScheduleData(guestUser.id)
+        if (schedule) {
+          fetchCalendarSlots(schedule, guestUser.id)
+        }
       } catch (error) {
         console.error('❌ Guest login handler error:', error)
       }
@@ -380,7 +382,6 @@ export default function BookingPage() {
     window.location.reload()
   }
 
-  // ⭐ 특정 30분 슬롯이 예약 가능한지 확인
   const isHalfHourAvailable = (date: string, startTime: string): boolean => {
     const startMinutes = timeToMinutes(startTime)
     const endMinutes = startMinutes + 30
@@ -392,7 +393,6 @@ export default function BookingPage() {
     )
   }
 
-  // ⭐ 해당 시간대에 예약 가능한지 확인
   const isTimeSlotAvailable = (date: string, startTime: string, endTime: string): boolean => {
     const startMinutes = timeToMinutes(startTime)
     const endMinutes = timeToMinutes(endTime)
@@ -407,7 +407,6 @@ export default function BookingPage() {
     return true
   }
 
-  // ⭐ 셀 클릭 - 박스 생성 (클릭한 Y 위치 기반)
   const handleCellClick = (date: string, hour: number, e: React.MouseEvent<HTMLDivElement>) => {
     if (!schedule || isDragging) return
     
@@ -415,7 +414,6 @@ export default function BookingPage() {
     const clickY = e.clientY - rect.top
     const cellHeight = rect.height
     
-    // 클릭한 위치가 셀의 위쪽 절반이면 00분, 아래쪽 절반이면 30분
     const minute = clickY < cellHeight / 2 ? 0 : 30
     
     const startMinutes = hour * 60 + minute
@@ -435,7 +433,6 @@ export default function BookingPage() {
     })
   }
 
-  // ⭐ 박스 드래그 시작
   const handleBlockMouseDown = (e: React.MouseEvent) => {
     if (!selectedBlock) return
     
@@ -447,17 +444,15 @@ export default function BookingPage() {
     setDragInitialTop(timeToMinutes(selectedBlock.startTime))
   }
 
-  // ⭐ 박스 드래그 중
   const handleMouseMove = (e: MouseEvent) => {
     if (!isDragging || !selectedBlock || !schedule) return
     
     const deltaY = e.clientY - dragStartY
-    const deltaMinutes = Math.round((deltaY / 96) * 60) // 96px = 1시간
+    const deltaMinutes = Math.round((deltaY / 96) * 60)
     
     let newStartMinutes = dragInitialTop + deltaMinutes
     newStartMinutes = snapToHalfHour(newStartMinutes)
     
-    // 영업시간 범위 체크 (09:00 ~ 18:00)
     const minMinutes = 9 * 60
     const maxMinutes = 18 * 60 - schedule.time_slot_duration
     
@@ -468,7 +463,6 @@ export default function BookingPage() {
     const newEndMinutes = newStartMinutes + schedule.time_slot_duration
     const newEndTime = minutesToTime(newEndMinutes)
     
-    // 예약 가능한지 확인
     if (!isTimeSlotAvailable(selectedBlock.date, newStartTime, newEndTime)) {
       return
     }
@@ -480,7 +474,6 @@ export default function BookingPage() {
     })
   }
 
-  // ⭐ 박스 드래그 종료
   const handleMouseUp = () => {
     setIsDragging(false)
   }
@@ -496,115 +489,109 @@ export default function BookingPage() {
     }
   }, [isDragging, selectedBlock, schedule, dragStartY, dragInitialTop])
 
-  // ⭐ 선택 취소
   const cancelSelection = () => {
     setSelectedBlock(null)
   }
 
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault()
-  if (!selectedBlock || !schedule) return
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedBlock || !schedule) return
 
-  console.log('🚀 BOOKING SUBMISSION')
-  console.log('One-time mode:', isOneTimeMode)
-  console.log('Token:', oneTimeToken)
+    console.log('🚀 BOOKING SUBMISSION')
 
-  if (submitting) {
-    console.log('⚠️ Already submitting')
-    return
-  }
-
-  setSubmitting(true)
-
-  try {
-    console.log('💾 Creating booking...')
-    const { error: bookingError } = await supabase
-      .from('bookings')
-      .insert({
-        schedule_id: schedule.id,
-        guest_name: guestInfo.name,
-        guest_email: guestInfo.email,
-        booking_date: selectedBlock.date,
-        start_time: selectedBlock.startTime,
-        end_time: selectedBlock.endTime,
-        status: 'confirmed',
-      })
-
-    if (bookingError) {
-      console.error('❌ Booking error:', bookingError)
-      throw bookingError
+    if (submitting) {
+      console.log('⚠️ Already submitting')
+      return
     }
 
-    console.log('✅ Booking created')
+    setSubmitting(true)
 
     try {
-      console.log('📅 Adding to calendar...')
-      const response = await fetch('/api/calendar/add-event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scheduleId: schedule.id,
-          bookingDate: selectedBlock.date,
-          startTime: selectedBlock.startTime,
-          endTime: selectedBlock.endTime,
-          guestName: guestInfo.name,
-          guestEmail: guestInfo.email,
-          guestUserId: guestUser?.id,
-        }),
-      })
-      
-      if (response.ok) {
-        console.log('✅ Calendar event created')
-      } else {
-        console.log('⚠️ Calendar failed, but booking saved')
-      }
-    } catch (calendarError) {
-      console.error('⚠️ Calendar error:', calendarError)
-    }
+      console.log('💾 Creating booking...')
+      const { error: bookingError } = await supabase
+        .from('bookings')
+        .insert({
+          schedule_id: schedule.id,
+          guest_name: guestInfo.name,
+          guest_email: guestInfo.email,
+          booking_date: selectedBlock.date,
+          start_time: selectedBlock.startTime,
+          end_time: selectedBlock.endTime,
+          status: 'confirmed',
+        })
 
-    // ⭐ 원타임 토큰 사용 처리
-    if (oneTimeToken) {
-      console.log('🔒 Marking token as used:', oneTimeToken)
-      
+      if (bookingError) {
+        console.error('❌ Booking error:', bookingError)
+        throw bookingError
+      }
+
+      console.log('✅ Booking created')
+
       try {
-        await fetch('/api/one-time-token/use', {
+        console.log('📅 Adding to calendar...')
+        const response = await fetch('/api/calendar/add-event', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: oneTimeToken })
+          body: JSON.stringify({
+            scheduleId: schedule.id,
+            bookingDate: selectedBlock.date,
+            startTime: selectedBlock.startTime,
+            endTime: selectedBlock.endTime,
+            guestName: guestInfo.name,
+            guestEmail: guestInfo.email,
+            guestUserId: guestUser?.id,
+          }),
         })
-        console.log('✅ Token marked as used')
-      } catch (error) {
-        console.error('⚠️ Failed to mark token as used:', error)
+        
+        if (response.ok) {
+          console.log('✅ Calendar event created')
+        } else {
+          console.log('⚠️ Calendar failed, but booking saved')
+        }
+      } catch (calendarError) {
+        console.error('⚠️ Calendar error:', calendarError)
       }
+
+      if (oneTimeToken) {
+        console.log('🔒 Marking token as used:', oneTimeToken)
+        
+        try {
+          await fetch('/api/one-time-token/use', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: oneTimeToken })
+          })
+          console.log('✅ Token marked as used')
+        } catch (error) {
+          console.error('⚠️ Failed to mark token as used:', error)
+        }
+      }
+
+      const bookingDate = new Date(selectedBlock.date).toLocaleDateString('ja-JP', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long'
+      })
+
+      alert(
+        `予約が完了しました！\n\n` +
+        `📅 日時：${bookingDate}\n` +
+        `🕐 時間：${selectedBlock.startTime.slice(0, 5)} - ${selectedBlock.endTime.slice(0, 5)}\n` +
+        `👤 名前：${guestInfo.name}\n` +
+        `📧 メール：${guestInfo.email}\n\n` +
+        `カレンダーに追加されました。`
+      )
+      
+      setTimeout(() => window.location.reload(), 1500)
+    } catch (error) {
+      console.error('❌ Submit error:', error)
+      alert('予約に失敗しました')
+    } finally {
+      setSubmitting(false)
     }
-
-    // ⭐ 예약 완료 알림 (상세 정보 포함)
-    const bookingDate = new Date(selectedBlock.date).toLocaleDateString('ja-JP', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      weekday: 'long'
-    })
-
-    alert(
-      `予約が完了しました！\n\n` +
-      `📅 日時：${bookingDate}\n` +
-      `🕐 時間：${selectedBlock.startTime.slice(0, 5)} - ${selectedBlock.endTime.slice(0, 5)}\n` +
-      `👤 名前：${guestInfo.name}\n` +
-      `📧 メール：${guestInfo.email}\n\n` +
-      `カレンダーに追加されました。`
-    )
-    
-    setTimeout(() => window.location.reload(), 1500)
-  } catch (error) {
-    console.error('❌ Submit error:', error)
-    alert('予約に失敗しました')
-  } finally {
-    setSubmitting(false)
   }
-}
 
-  // ⭐ 이전 3일로 이동
   const goToPrev3Days = () => {
     if (!schedule) return
     
@@ -616,7 +603,6 @@ const handleSubmit = async (e: React.FormEvent) => {
     }
   }
 
-  // ⭐ 다음 3일로 이동
   const goToNext3Days = () => {
     if (!schedule) return
     
@@ -628,12 +614,10 @@ const handleSubmit = async (e: React.FormEvent) => {
     }
   }
 
-  // ⭐ 오늘로 이동
   const goToToday = () => {
     setStartDate(new Date())
   }
 
-  // ⭐ 이전/다음 버튼 활성화 여부
   const canGoPrev = schedule ? isDateInRange(
     new Date(startDate.getTime() - 3 * 24 * 60 * 60 * 1000),
     schedule.date_range_start,
@@ -646,15 +630,18 @@ const handleSubmit = async (e: React.FormEvent) => {
     schedule.date_range_end
   ) : false
 
+  // ⭐ 스케줄 정보 로딩 중 (간단한 로딩 화면)
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-600">読み込み中...</p>
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+          <p className="text-gray-600">読み込み中...</p>
+        </div>
       </div>
     )
   }
 
-  // ⭐ Step 4: 토큰 에러 화면
   if (tokenError) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -706,24 +693,21 @@ const handleSubmit = async (e: React.FormEvent) => {
     )
   }
 
-  // ⭐ 1시간 단위 시간 슬롯 (09:00, 10:00, ..., 17:00)
   const hourSlots: number[] = []
   for (let hour = 9; hour <= 17; hour++) {
     hourSlots.push(hour)
   }
 
-  // ⭐ 표시할 3일 계산 (오늘/내일/모레)
   const displayDates = getThreeDayDates(startDate).filter(date => 
     isDateInRange(date, schedule.date_range_start, schedule.date_range_end)
   )
 
-  // ⭐ 박스 높이 계산 (1시간 = 96px)
   const blockHeightPx = schedule ? (schedule.time_slot_duration / 60) * 96 : 96
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* 헤더 박스 */}
+        {/* ⭐ 헤더 박스 (즉시 표시) */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <div className="flex items-start justify-between mb-4">
             <div className="flex-1">
@@ -792,7 +776,7 @@ const handleSubmit = async (e: React.FormEvent) => {
           </div>
         </div>
 
-        {/* 예약 정보 박스 */}
+        {/* ⭐ 예약 정보 박스 (즉시 표시) */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">
             予約情報
@@ -811,7 +795,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                   {selectedBlock.startTime} - {selectedBlock.endTime}
                 </p>
                 
-                {/* ⭐ 빨간 X 버튼 */}
                 <button
                   type="button"
                   onClick={cancelSelection}
@@ -899,12 +882,12 @@ const handleSubmit = async (e: React.FormEvent) => {
           )}
         </div>
 
-        {/* ⭐ 캘린더 박스 - 3일 뷰 (오늘 + 2일) */}
+        {/* ⭐ 캘린더 박스 (백그라운드 로딩) */}
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <button
               onClick={goToPrev3Days}
-              disabled={!canGoPrev}
+              disabled={!canGoPrev || isLoadingSlots}
               className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ← 前の3日
@@ -913,7 +896,8 @@ const handleSubmit = async (e: React.FormEvent) => {
             <div className="flex items-center gap-3">
               <button
                 onClick={goToToday}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors"
+                disabled={isLoadingSlots}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50"
               >
                 今日
               </button>
@@ -925,16 +909,19 @@ const handleSubmit = async (e: React.FormEvent) => {
             
             <button
               onClick={goToNext3Days}
-              disabled={!canGoNext}
+              disabled={!canGoNext || isLoadingSlots}
               className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               次の3日 →
             </button>
           </div>
 
+          {/* ⭐ 캘린더 로딩 중 */}
           {isLoadingSlots ? (
             <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
               <p className="text-gray-500">カレンダーを確認中...</p>
+              <p className="text-xs text-gray-400 mt-2">Googleカレンダーと同期しています</p>
             </div>
           ) : displayDates.length === 0 ? (
             <div className="text-center py-12">
@@ -997,7 +984,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                               style={{ height: '96px' }}
                               onClick={(e) => handleCellClick(dateStr, hour, e)}
                             >
-                              {/* ⭐ 위쪽 절반 (00분) */}
                               <div 
                                 className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
                                   isFirstHalfAvailable 
@@ -1006,7 +992,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                                 }`}
                                 style={{ height: '48px' }}
                               >
-                                {/* ⭐ 예약 불가 문구 */}
                                 {!isFirstHalfAvailable && (
                                   <div className="flex items-center justify-center h-full">
                                     <span className="text-xs text-gray-400 font-medium opacity-80">予約不可</span>
@@ -1014,13 +999,11 @@ const handleSubmit = async (e: React.FormEvent) => {
                                 )}
                               </div>
                               
-                              {/* 30분 구분선 (점선) */}
                               <div 
                                 className="absolute left-0 right-0 border-t border-dashed border-gray-300 pointer-events-none z-10" 
                                 style={{ top: '48px' }} 
                               />
                               
-                              {/* ⭐ 아래쪽 절반 (30분) */}
                               <div 
                                 className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
                                   isSecondHalfAvailable 
@@ -1029,7 +1012,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                                 }`}
                                 style={{ height: '48px' }}
                               >
-                                {/* ⭐ 예약 불가 문구 */}
                                 {!isSecondHalfAvailable && (
                                   <div className="flex items-center justify-center h-full">
                                     <span className="text-xs text-gray-400 font-medium opacity-80">予約不可</span>
@@ -1037,7 +1019,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                                 )}
                               </div>
                               
-                              {/* 선택된 박스 */}
                               {isBlockStart && (
                                 <div
                                   className={`absolute left-1 right-1 bg-blue-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-20 ${

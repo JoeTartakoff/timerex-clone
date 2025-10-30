@@ -26,7 +26,6 @@ interface TimeBlock {
   endTime: string
 }
 
-// ⭐ 3일 날짜 계산 (오늘/내일/모레)
 function getThreeDayDates(center: Date): Date[] {
   const dates: Date[] = []
   for (let i = 0; i <= 2; i++) {
@@ -42,7 +41,6 @@ function isDateInRange(date: Date, start: string, end: string): boolean {
   return dateStr >= start && dateStr <= end
 }
 
-// ⭐ 시간 계산 유틸리티
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number)
   return hours * 60 + minutes
@@ -78,11 +76,7 @@ export default function CandidatePage() {
   })
   const [submitting, setSubmitting] = useState(false)
   const [responseLink, setResponseLink] = useState<string | null>(null)
-
-  // ⭐ 3일 뷰를 위한 시작 날짜
   const [startDate, setStartDate] = useState<Date>(new Date())
-
-  // ⭐ 드래그 상태
   const [draggingBlockIndex, setDraggingBlockIndex] = useState<number | null>(null)
   const [dragStartY, setDragStartY] = useState(0)
   const [dragInitialTop, setDragInitialTop] = useState(0)
@@ -109,6 +103,8 @@ export default function CandidatePage() {
 
   const loadSchedule = async () => {
     try {
+      console.log('📋 Loading schedule info...')
+      
       const { data, error } = await supabase
         .from('schedules')
         .select('*')
@@ -118,19 +114,19 @@ export default function CandidatePage() {
 
       if (error) throw error
 
+      console.log('✅ Schedule loaded:', data.title)
       setSchedule(data)
+      setLoading(false) // ⭐ 즉시 UI 표시
 
       const today = new Date()
       setStartDate(today)
     } catch (error) {
       console.error('Error loading schedule:', error)
       alert('スケジュールの読み込みに失敗しました')
-    } finally {
       setLoading(false)
     }
   }
 
-  // ⭐ 특정 30분 슬롯이 후보 시간인지 확인
   const isHalfHourInCandidates = (date: string, startTime: string): boolean => {
     if (!schedule) return false
     
@@ -144,7 +140,6 @@ export default function CandidatePage() {
     )
   }
 
-  // ⭐ 해당 시간대가 후보 시간에 포함되는지 확인
   const isTimeSlotInCandidates = (date: string, startTime: string, endTime: string): boolean => {
     if (!schedule) return false
     
@@ -161,7 +156,6 @@ export default function CandidatePage() {
     return true
   }
 
-  // ⭐ 셀 클릭 - 박스 생성
   const handleCellClick = (date: string, hour: number, e: React.MouseEvent<HTMLDivElement>) => {
     if (!schedule || draggingBlockIndex !== null) return
     
@@ -181,16 +175,13 @@ export default function CandidatePage() {
       return
     }
     
-    // 이미 선택된 블록인지 확인
     const existingIndex = selectedBlocks.findIndex(
       b => b.date === date && b.startTime === startTime
     )
     
     if (existingIndex >= 0) {
-      // 이미 있으면 제거
       setSelectedBlocks(selectedBlocks.filter((_, i) => i !== existingIndex))
     } else {
-      // 없으면 추가
       const newBlock: TimeBlock = {
         id: nanoid(10),
         date,
@@ -201,7 +192,6 @@ export default function CandidatePage() {
     }
   }
 
-  // ⭐ 박스 드래그 시작
   const handleBlockMouseDown = (e: React.MouseEvent, blockIndex: number) => {
     e.stopPropagation()
     e.preventDefault()
@@ -211,7 +201,6 @@ export default function CandidatePage() {
     setDragInitialTop(timeToMinutes(selectedBlocks[blockIndex].startTime))
   }
 
-  // ⭐ 박스 드래그 중
   const handleMouseMove = (e: MouseEvent) => {
     if (draggingBlockIndex === null || !schedule) return
     
@@ -246,7 +235,6 @@ export default function CandidatePage() {
     setSelectedBlocks(newBlocks)
   }
 
-  // ⭐ 박스 드래그 종료
   const handleMouseUp = () => {
     setDraggingBlockIndex(null)
   }
@@ -262,7 +250,6 @@ export default function CandidatePage() {
     }
   }, [draggingBlockIndex, selectedBlocks, schedule, dragStartY, dragInitialTop])
 
-  // ⭐ 박스 삭제
   const removeBlock = (blockIndex: number) => {
     setSelectedBlocks(selectedBlocks.filter((_, i) => i !== blockIndex))
   }
@@ -276,7 +263,6 @@ export default function CandidatePage() {
     try {
       const shareToken = nanoid(10)
 
-      // ID 제거하고 저장
       const slotsToSave = selectedBlocks.map(({ date, startTime, endTime }) => ({
         date,
         startTime,
@@ -315,7 +301,6 @@ export default function CandidatePage() {
     }
   }
 
-  // ⭐ 이전 3일로 이동
   const goToPrev3Days = () => {
     if (!schedule) return
     
@@ -327,7 +312,6 @@ export default function CandidatePage() {
     }
   }
 
-  // ⭐ 다음 3일로 이동
   const goToNext3Days = () => {
     if (!schedule) return
     
@@ -355,10 +339,14 @@ export default function CandidatePage() {
     schedule.date_range_end
   ) : false
 
+  // ⭐ 간단한 로딩 화면
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-600">読み込み中...</p>
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div>
+          <p className="text-gray-600">読み込み中...</p>
+        </div>
       </div>
     )
   }
@@ -396,7 +384,7 @@ export default function CandidatePage() {
             </div>
             <button
               onClick={copyResponseLink}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md"
+              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-md"
             >
               リンクをコピー
             </button>
@@ -420,7 +408,7 @@ export default function CandidatePage() {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* 헤더 박스 */}
+        {/* ⭐ 헤더 박스 (즉시 표시) */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <div className="flex items-start justify-between">
             <div className="flex-1">
@@ -439,7 +427,7 @@ export default function CandidatePage() {
           </div>
         </div>
 
-        {/* 예약 정보 박스 */}
+        {/* ⭐ 예약 정보 박스 (즉시 표시) */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">
             予約情報
@@ -518,7 +506,7 @@ export default function CandidatePage() {
           )}
         </div>
 
-        {/* 캘린더 박스 */}
+        {/* ⭐ 캘린더 박스 (즉시 표시) */}
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <button
@@ -581,115 +569,109 @@ export default function CandidatePage() {
                     })}
                   </tr>
                 </thead>
-<tbody>
-  {hourSlots.map((hour) => {
-    return (
-      <tr key={hour}>
-        <td className="border border-gray-300 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
-          {String(hour).padStart(2, '0')}:00
-        </td>
-        {displayDates.map((date, dateIdx) => {
-          const dateStr = date.toISOString().split('T')[0]
-          
-          const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
-          const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
-          const isFirstHalfAvailable = isHalfHourInCandidates(dateStr, firstHalfTime)
-          const isSecondHalfAvailable = isHalfHourInCandidates(dateStr, secondHalfTime)
+                <tbody>
+                  {hourSlots.map((hour) => {
+                    return (
+                      <tr key={hour}>
+                        <td className="border border-gray-300 bg-gray-50 p-2 text-xs text-gray-600 text-center align-top">
+                          {String(hour).padStart(2, '0')}:00
+                        </td>
+                        {displayDates.map((date, dateIdx) => {
+                          const dateStr = date.toISOString().split('T')[0]
+                          
+                          const firstHalfTime = `${String(hour).padStart(2, '0')}:00`
+                          const secondHalfTime = `${String(hour).padStart(2, '0')}:30`
+                          const isFirstHalfAvailable = isHalfHourInCandidates(dateStr, firstHalfTime)
+                          const isSecondHalfAvailable = isHalfHourInCandidates(dateStr, secondHalfTime)
 
-          return (
-            <td 
-              key={dateIdx} 
-              className="border border-gray-300 p-0 relative"
-              style={{ height: '96px' }}
-              onClick={(e) => handleCellClick(dateStr, hour, e)}
-            >
-              {/* ⭐ 위쪽 절반 (00분) */}
-              <div 
-                className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
-                  isFirstHalfAvailable 
-                    ? 'hover:bg-purple-50' 
-                    : 'bg-gray-200 cursor-not-allowed'
-                }`}
-                style={{ height: '48px' }}
-              >
-                {/* ⭐ 예약 불가 문구 */}
-                {!isFirstHalfAvailable && (
-                  <div className="flex items-center justify-center h-full">
-                    <span className="text-xs text-gray-400 font-medium opacity-80">選択不可</span>
-                  </div>
-                )}
-              </div>
-              
-              {/* ⭐ 30분 구분선 (점선) */}
-              <div 
-                className="absolute left-0 right-0 border-t border-dashed border-gray-300 pointer-events-none z-10" 
-                style={{ top: '48px' }} 
-              />
-              
-              {/* ⭐ 아래쪽 절반 (30분) */}
-              <div 
-                className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
-                  isSecondHalfAvailable 
-                    ? 'hover:bg-purple-50' 
-                    : 'bg-gray-200 cursor-not-allowed'
-                }`}
-                style={{ height: '48px' }}
-              >
-                {/* ⭐ 예약 불가 문구 */}
-                {!isSecondHalfAvailable && (
-                  <div className="flex items-center justify-center h-full">
-                    <span className="text-xs text-gray-400 font-medium opacity-80">選択不可</span>
-                  </div>
-                )}
-              </div>
-              
-              {/* 선택된 박스들 */}
-              {selectedBlocks.map((block, blockIdx) => {
-                const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
-                const isBlockStart = block.date === dateStr && blockStartHour === hour
-                
-                if (!isBlockStart) return null
-                
-                const blockTopPosition = timeToPixelPosition(block.startTime) - (blockStartHour - 9) * 96
-                const isDraggingThis = draggingBlockIndex === blockIdx
+                          return (
+                            <td 
+                              key={dateIdx} 
+                              className="border border-gray-300 p-0 relative"
+                              style={{ height: '96px' }}
+                              onClick={(e) => handleCellClick(dateStr, hour, e)}
+                            >
+                              <div 
+                                className={`absolute top-0 left-0 right-0 cursor-pointer transition-colors ${
+                                  isFirstHalfAvailable 
+                                    ? 'hover:bg-purple-50' 
+                                    : 'bg-gray-200 cursor-not-allowed'
+                                }`}
+                                style={{ height: '48px' }}
+                              >
+                                {!isFirstHalfAvailable && (
+                                  <div className="flex items-center justify-center h-full">
+                                    <span className="text-xs text-gray-400 font-medium opacity-80">選択不可</span>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              <div 
+                                className="absolute left-0 right-0 border-t border-dashed border-gray-300 pointer-events-none z-10" 
+                                style={{ top: '48px' }} 
+                              />
+                              
+                              <div 
+                                className={`absolute bottom-0 left-0 right-0 cursor-pointer transition-colors ${
+                                  isSecondHalfAvailable 
+                                    ? 'hover:bg-purple-50' 
+                                    : 'bg-gray-200 cursor-not-allowed'
+                                }`}
+                                style={{ height: '48px' }}
+                              >
+                                {!isSecondHalfAvailable && (
+                                  <div className="flex items-center justify-center h-full">
+                                    <span className="text-xs text-gray-400 font-medium opacity-80">選択不可</span>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {selectedBlocks.map((block, blockIdx) => {
+                                const blockStartHour = Math.floor(timeToMinutes(block.startTime) / 60)
+                                const isBlockStart = block.date === dateStr && blockStartHour === hour
+                                
+                                if (!isBlockStart) return null
+                                
+                                const blockTopPosition = timeToPixelPosition(block.startTime) - (blockStartHour - 9) * 96
+                                const isDraggingThis = draggingBlockIndex === blockIdx
 
-                return (
-                  <div
-                    key={block.id}
-                    className={`absolute left-1 right-1 bg-purple-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-20 ${
-                      isDraggingThis ? 'cursor-grabbing' : 'cursor-move'
-                    }`}
-                    style={{
-                      top: `${blockTopPosition}px`,
-                      height: `${blockHeightPx}px`
-                    }}
-                    onMouseDown={(e) => handleBlockMouseDown(e, blockIdx)}
-                  >
-                    <div className="text-center relative w-full">
-                      <div>{block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}</div>
-                      <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
-                      
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeBlock(blockIdx)
-                        }}
-                        className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md z-30"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </td>
-          )
-        })}
-      </tr>
-    )
-  })}
-</tbody>
+                                return (
+                                  <div
+                                    key={block.id}
+                                    className={`absolute left-1 right-1 bg-purple-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-20 ${
+                                      isDraggingThis ? 'cursor-grabbing' : 'cursor-move'
+                                    }`}
+                                    style={{
+                                      top: `${blockTopPosition}px`,
+                                      height: `${blockHeightPx}px`
+                                    }}
+                                    onMouseDown={(e) => handleBlockMouseDown(e, blockIdx)}
+                                  >
+                                    <div className="text-center relative w-full">
+                                      <div>{block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}</div>
+                                      <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
+                                      
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          removeBlock(blockIdx)
+                                        }}
+                                        className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md z-30"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                </tbody>
               </table>
             </div>
           )}
