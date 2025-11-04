@@ -431,6 +431,8 @@ export default function BookingPage() {
       startTime,
       endTime
     })
+
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleBlockMouseDown = (e: React.MouseEvent) => {
