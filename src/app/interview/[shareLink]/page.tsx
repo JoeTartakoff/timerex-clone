@@ -69,6 +69,7 @@ export default function InterviewPage() {
   const [loading, setLoading] = useState(true)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [selectedBlocks, setSelectedBlocks] = useState<TimeBlock[]>([])
+  const [showPopup, setShowPopup] = useState(false)
   const [guestInfo, setGuestInfo] = useState({
     name: '',
     email: '',
@@ -79,6 +80,7 @@ export default function InterviewPage() {
   const [draggingBlockIndex, setDraggingBlockIndex] = useState<number | null>(null)
   const [dragStartY, setDragStartY] = useState(0)
   const [dragInitialTop, setDragInitialTop] = useState(0)
+  const [isPrefilledGuest, setIsPrefilledGuest] = useState(false)
 
   const initRef = useRef(false)
 
@@ -93,10 +95,12 @@ export default function InterviewPage() {
     const emailParam = urlParams.get('email')
     
     if (nameParam && emailParam) {
+      console.log('👤 Guest info from URL:', nameParam, emailParam)
       setGuestInfo({
         name: decodeURIComponent(nameParam),
         email: decodeURIComponent(emailParam),
       })
+      setIsPrefilledGuest(true)
     }
   }, [shareLink])
 
@@ -115,7 +119,7 @@ export default function InterviewPage() {
 
       console.log('✅ Schedule loaded:', data.title)
       setSchedule(data)
-      setLoading(false) // ⭐ 즉시 UI 표시
+      setLoading(false)
 
       const today = new Date()
       setStartDate(today)
@@ -201,8 +205,6 @@ export default function InterviewPage() {
       }
       setSelectedBlocks([...selectedBlocks, newBlock])
     }
-
-    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleBlockMouseDown = (e: React.MouseEvent, blockIndex: number) => {
@@ -352,7 +354,6 @@ export default function InterviewPage() {
     schedule.date_range_end
   ) : false
 
-  // ⭐ 간단한 로딩 화면
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -424,7 +425,6 @@ export default function InterviewPage() {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* ⭐ 헤더 박스 (즉시 표시) */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <div className="flex items-start justify-between">
             <div className="flex-1">
@@ -438,10 +438,15 @@ export default function InterviewPage() {
                 <span>📅 {schedule.date_range_start} ～ {schedule.date_range_end}</span>
                 <span>⏱️ {schedule.time_slot_duration}分</span>
               </div>
-              <div className="mt-4">
+              <div className="mt-4 flex items-center gap-2">
                 <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
                   🎤 候補日を受取
                 </span>
+                {isPrefilledGuest && (
+                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    ✅ 専用リンク
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -459,86 +464,20 @@ export default function InterviewPage() {
           </div>
         </div>
 
-        {/* ⭐ 예약 정보 박스 (즉시 표시) */}
-        <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">
-            予約情報
-          </h2>
-
-          {selectedBlocks.length > 0 ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="bg-orange-50 p-4 rounded-md mb-4">
-                <p className="text-sm font-medium text-orange-900 mb-2">
-                  選択した時間: {selectedBlocks.length}個
-                </p>
-                <div className="mt-2 space-y-2">
-                  {selectedBlocks.map((block, idx) => (
-                    <div key={block.id} className="flex items-center justify-between bg-white p-2 rounded border border-orange-200">
-                      <p className="text-xs text-orange-700">
-                        {new Date(block.date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} {block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => removeBlock(idx)}
-                        className="w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  お名前 *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={guestInfo.name}
-                  onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
-                  className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  メールアドレス *
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={guestInfo.email}
-                  onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
-                  className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium py-3 px-4 rounded-md disabled:bg-gray-400"
-              >
-                {submitting ? '送信中...' : '候補時間を送信'}
-              </button>
-            </form>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-gray-500">
-                下のカレンダーで時間をクリックして選択してください（複数選択可）
-              </p>
-              <p className="text-sm text-gray-400 mt-2">
-                予約時間: {schedule.time_slot_duration}分
-              </p>
-              <p className="text-sm text-gray-400">
-                選択後、ドラッグで時間を調整できます
-              </p>
-            </div>
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-orange-800">
+            📌 カレンダーで時間をクリックして選択してください（複数選択可）
+          </p>
+          <p className="text-xs text-orange-600 mt-1">
+            予約時間: {schedule.time_slot_duration}分 | 選択後、ドラッグで時間を調整できます
+          </p>
+          {selectedBlocks.length > 0 && (
+            <p className="text-xs text-orange-700 mt-2 font-medium">
+              ✅ {selectedBlocks.length}個の時間を選択中
+            </p>
           )}
         </div>
 
-        {/* ⭐ 캘린더 박스 (즉시 표시) */}
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <button
@@ -708,7 +647,126 @@ export default function InterviewPage() {
             </div>
           )}
         </div>
+
+        {selectedBlocks.length > 0 && (
+          <div className="fixed bottom-8 right-8 z-40">
+            <button
+              onClick={() => setShowPopup(true)}
+              className="bg-orange-600 hover:bg-orange-700 text-white font-medium py-4 px-6 rounded-full shadow-lg transition-all hover:scale-105"
+            >
+              候補時間を送信 ({selectedBlocks.length}個)
+            </button>
+          </div>
+        )}
       </div>
+
+      {showPopup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900">
+                  候補時間の送信
+                </h2>
+                <button
+                  onClick={() => setShowPopup(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="bg-orange-50 p-4 rounded-md mb-6">
+                <p className="text-sm font-medium text-orange-900 mb-2">
+                  📅 選択した時間: {selectedBlocks.length}個
+                </p>
+                <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+                  {selectedBlocks.map((block, idx) => (
+                    <div key={block.id} className="flex items-center justify-between bg-white p-2 rounded border border-orange-200">
+                      <p className="text-xs text-orange-700">
+                        {new Date(block.date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} {block.startTime.slice(0, 5)} - {block.endTime.slice(0, 5)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => removeBlock(idx)}
+                        className="w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {isPrefilledGuest && (
+                <div className="bg-green-50 p-3 rounded-md border border-green-200 mb-4">
+                  <p className="text-xs text-green-800 font-medium">
+                    ✅ 専用リンク
+                  </p>
+                  <p className="text-xs text-green-700 mt-1">
+                    情報が自動入力されています
+                  </p>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    お名前 *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={guestInfo.name}
+                    onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
+                    disabled={isPrefilledGuest}
+                    className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 ${
+                      isPrefilledGuest ? 'bg-gray-100 text-gray-900 font-medium' : ''
+                    }`}
+                    placeholder="山田太郎"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    メールアドレス *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={guestInfo.email}
+                    onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
+                    disabled={isPrefilledGuest}
+                    className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 ${
+                      isPrefilledGuest ? 'bg-gray-100 text-gray-900 font-medium' : ''
+                    }`}
+                    placeholder="yamada@example.com"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowPopup(false)}
+                    className="flex-1 px-4 py-3 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-medium py-3 px-4 rounded-md disabled:bg-gray-400 transition-colors"
+                  >
+                    {submitting ? '送信中...' : '候補時間を送信'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

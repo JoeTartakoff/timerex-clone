@@ -83,6 +83,7 @@ export default function BookingPage() {
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [availableSlots, setAvailableSlots] = useState<AvailabilitySlot[]>([])
   const [selectedBlock, setSelectedBlock] = useState<TimeBlock | null>(null)
+  const [showPopup, setShowPopup] = useState(false)
   const [guestInfo, setGuestInfo] = useState({
     name: '',
     email: '',
@@ -93,10 +94,7 @@ export default function BookingPage() {
   const [isOneTimeMode, setIsOneTimeMode] = useState(false)
   const [oneTimeToken, setOneTimeToken] = useState<string | null>(null)
   const [tokenAlreadyUsed, setTokenAlreadyUsed] = useState(false)
-  const [isPrefilledGuest, setIsPrefilledGuest] = useState(false)
-  const [guestToken, setGuestToken] = useState<string | null>(null)
   const [tokenError, setTokenError] = useState<string | null>(null)
-  const [isValidToken, setIsValidToken] = useState<boolean>(true)
   const [startDate, setStartDate] = useState<Date>(new Date())
   const [isDragging, setIsDragging] = useState(false)
   const [dragStartY, setDragStartY] = useState(0)
@@ -105,7 +103,6 @@ export default function BookingPage() {
   const initRef = useRef(false)
   const guestLoginProcessedRef = useRef(false)
 
-  // ⭐ 스케줄 정보만 먼저 로딩
   const fetchScheduleInfo = async () => {
     try {
       console.log('📋 Fetching schedule info...')
@@ -120,7 +117,7 @@ export default function BookingPage() {
 
       console.log('✅ Schedule info loaded:', scheduleData.title)
       setSchedule(scheduleData)
-      setLoading(false) // ⭐ 여기서 먼저 로딩 해제!
+      setLoading(false)
 
       const today = new Date()
       setStartDate(today)
@@ -134,7 +131,6 @@ export default function BookingPage() {
     }
   }
 
-  // ⭐ 캘린더 슬롯은 백그라운드에서 로딩
   const fetchCalendarSlots = async (scheduleData: Schedule, guestUserId?: string) => {
     try {
       console.log('📅 Fetching calendar slots...')
@@ -149,11 +145,8 @@ export default function BookingPage() {
         }),
       })
 
-      console.log('API response status:', response.status)
-
       if (response.ok) {
         const result = await response.json()
-        console.log('API result:', result)
         
         if (result.success && result.slots && result.slots.length > 0) {
           const slotsWithId = result.slots.map((slot: any, index: number) => ({
@@ -191,33 +184,6 @@ export default function BookingPage() {
     }
   }
 
-  const fetchGuestPreset = async (token: string) => {
-    try {
-      console.log('🔍 Fetching guest preset for token:', token)
-      
-      const response = await fetch(`/api/guest-presets/${token}`)
-      
-      if (response.ok) {
-        const data = await response.json()
-        console.log('✅ Guest preset found:', data)
-        
-        setGuestInfo({
-          name: data.guestName,
-          email: data.guestEmail,
-        })
-        setIsPrefilledGuest(true)
-        
-        setTimeout(() => {
-          alert(`${data.guestName}様専用リンクです\n情報が自動入力されました`)
-        }, 500)
-      } else {
-        console.log('⚠️ Guest preset not found')
-      }
-    } catch (error) {
-      console.error('❌ Failed to fetch guest preset:', error)
-    }
-  }
-
   useEffect(() => {
     const initPage = async () => {
       if (initRef.current) return
@@ -227,9 +193,7 @@ export default function BookingPage() {
 
       const urlParams = new URLSearchParams(window.location.search)
       const token = urlParams.get('token')
-      const guestParam = urlParams.get('guest')
 
-      // ⭐ 원타임 토큰 검증
       if (token) {
         console.log('🔍 Verifying one-time token:', token)
         
@@ -245,49 +209,36 @@ export default function BookingPage() {
           if (!result.valid) {
             console.log('❌ Token invalid:', result.message)
             setTokenError(result.message)
-            setIsValidToken(false)
             setLoading(false)
             return
           }
 
           console.log('✅ Token valid')
-          setIsValidToken(true)
           setIsOneTimeMode(true)
           setOneTimeToken(token)
         } catch (error) {
           console.error('❌ Token verification error:', error)
           setTokenError('トークンの検証に失敗しました')
-          setIsValidToken(false)
           setLoading(false)
           return
         }
       }
-      
-      if (guestParam) {
-        console.log('👤 Guest token detected:', guestParam)
-        setGuestToken(guestParam)
-        fetchGuestPreset(guestParam)
-      }
 
       const init = async () => {
         try {
-          // ⭐ 1단계: 스케줄 정보만 먼저 로딩
           const scheduleData = await fetchScheduleInfo()
           if (!scheduleData) return
 
-          // ⭐ 2단계: 사용자 정보 확인
           const { data: { user } } = await supabase.auth.getUser()
           
           if (user) {
             console.log('👤 User logged in:', user.email)
             setGuestUser(user as User)
             
-            if (!guestParam) {
-              setGuestInfo({
-                name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
-                email: user.email || '',
-              })
-            }
+            setGuestInfo({
+              name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+              email: user.email || '',
+            })
             
             const { data: { session } } = await supabase.auth.getSession()
             if (session?.provider_token && session?.provider_refresh_token) {
@@ -300,11 +251,9 @@ export default function BookingPage() {
               }, { onConflict: 'user_id' })
             }
             
-            // ⭐ 3단계: 캘린더 슬롯 백그라운드 로딩
             fetchCalendarSlots(scheduleData, user.id)
           } else {
             console.log('👤 No user logged in')
-            // ⭐ 3단계: 캘린더 슬롯 백그라운드 로딩
             fetchCalendarSlots(scheduleData)
           }
         } catch (error) {
@@ -431,8 +380,8 @@ export default function BookingPage() {
       startTime,
       endTime
     })
-
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    
+    setShowPopup(true)
   }
 
   const handleBlockMouseDown = (e: React.MouseEvent) => {
@@ -493,6 +442,7 @@ export default function BookingPage() {
 
   const cancelSelection = () => {
     setSelectedBlock(null)
+    setShowPopup(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -632,7 +582,6 @@ export default function BookingPage() {
     schedule.date_range_end
   ) : false
 
-  // ⭐ 스케줄 정보 로딩 중 (간단한 로딩 화면)
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -709,7 +658,7 @@ export default function BookingPage() {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* ⭐ 헤더 박스 (즉시 표시) */}
+        {/* 헤더 박스 */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <div className="flex items-start justify-between mb-4">
             <div className="flex-1">
@@ -725,15 +674,10 @@ export default function BookingPage() {
               </div>
             </div>
             
-            <div className="ml-4 flex flex-col gap-2">
+            <div className="ml-4">
               {isOneTimeMode && (
                 <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                   🔒 ワンタイムリンク
-                </span>
-              )}
-              {isPrefilledGuest && (
-                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  ✅ 専用リンク
                 </span>
               )}
             </div>
@@ -778,113 +722,17 @@ export default function BookingPage() {
           </div>
         </div>
 
-        {/* ⭐ 예약 정보 박스 (즉시 표시) */}
-        <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">
-            予約情報
-          </h2>
-
-          {selectedBlock ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="bg-blue-50 p-4 rounded-md mb-4 relative">
-                <p className="text-sm font-medium text-blue-900">
-                  選択した時間
-                </p>
-                <p className="text-sm text-blue-700 mt-1">
-                  {new Date(selectedBlock.date).toLocaleDateString('ja-JP')}
-                </p>
-                <p className="text-sm text-blue-700">
-                  {selectedBlock.startTime} - {selectedBlock.endTime}
-                </p>
-                
-                <button
-                  type="button"
-                  onClick={cancelSelection}
-                  className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
-                  title="選択をキャンセル"
-                >
-                  ×
-                </button>
-              </div>
-
-              {isOneTimeMode && (
-                <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
-                  <p className="text-xs text-yellow-800 font-medium">
-                    ⚠️ ワンタイムリンク
-                  </p>
-                  <p className="text-xs text-yellow-700 mt-1">
-                    予約完了後、このリンクは無効化されます
-                  </p>
-                </div>
-              )}
-
-              {isPrefilledGuest && (
-                <div className="bg-green-50 p-3 rounded-md border border-green-200">
-                  <p className="text-xs text-green-800 font-medium">
-                    ✅ 専用リンク
-                  </p>
-                  <p className="text-xs text-green-700 mt-1">
-                    情報が自動入力されています
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  お名前 *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={guestInfo.name}
-                  onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
-                  disabled={!!guestUser || isPrefilledGuest}
-                  className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 ${
-                    (guestUser || isPrefilledGuest) ? 'bg-gray-100' : ''
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  メールアドレス *
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={guestInfo.email}
-                  onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
-                  disabled={!!guestUser || isPrefilledGuest}
-                  className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 ${
-                    (guestUser || isPrefilledGuest) ? 'bg-gray-100' : ''
-                  }`}
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-md disabled:bg-gray-400"
-              >
-                {submitting ? '予約中...' : '予約を確定する'}
-              </button>
-            </form>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-gray-500">
-                下のカレンダーで時間をクリックして選択してください
-              </p>
-              <p className="text-sm text-gray-400 mt-2">
-                予約時間: {schedule.time_slot_duration}分
-              </p>
-              <p className="text-sm text-gray-400">
-                選択後、ドラッグで時間を調整できます
-              </p>
-            </div>
-          )}
+        {/* 안내 메시지 */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-blue-800">
+            📌 カレンダーで時間をクリックして予約してください
+          </p>
+          <p className="text-xs text-blue-600 mt-1">
+            予約時間: {schedule.time_slot_duration}分 | 選択後、ドラッグで時間を調整できます
+          </p>
         </div>
 
-        {/* ⭐ 캘린더 박스 (백그라운드 로딩) */}
+        {/* 캘린더 박스 */}
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <button
@@ -918,7 +766,6 @@ export default function BookingPage() {
             </button>
           </div>
 
-          {/* ⭐ 캘린더 로딩 중 */}
           {isLoadingSlots ? (
             <div className="text-center py-12">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
@@ -1021,7 +868,7 @@ export default function BookingPage() {
                                 )}
                               </div>
                               
-                              {isBlockStart && (
+                              {isBlockStart && !showPopup && (
                                 <div
                                   className={`absolute left-1 right-1 bg-blue-600 text-white rounded shadow-lg flex items-center justify-center text-xs font-medium z-20 ${
                                     isDragging ? 'cursor-grabbing' : 'cursor-move'
@@ -1031,21 +878,14 @@ export default function BookingPage() {
                                     height: `${blockHeightPx}px`
                                   }}
                                   onMouseDown={handleBlockMouseDown}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setShowPopup(true)
+                                  }}
                                 >
                                   <div className="text-center relative w-full">
                                     <div>{selectedBlock.startTime.slice(0, 5)} - {selectedBlock.endTime.slice(0, 5)}</div>
-                                    <div className="text-[10px] opacity-80 mt-1">ドラッグで調整</div>
-                                    
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        cancelSelection()
-                                      }}
-                                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-sm flex items-center justify-center hover:bg-red-600 transition-colors shadow-md z-30"
-                                    >
-                                      ×
-                                    </button>
+                                    <div className="text-[10px] opacity-80 mt-1">クリックで確定</div>
                                   </div>
                                 </div>
                               )}
@@ -1061,6 +901,121 @@ export default function BookingPage() {
           )}
         </div>
       </div>
+
+      {/* ⭐ 예약 확인 팝업 */}
+      {showPopup && selectedBlock && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900">
+                  予約内容の確認
+                </h2>
+                <button
+                  onClick={cancelSelection}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="bg-blue-50 p-4 rounded-md mb-6">
+                <p className="text-sm font-medium text-blue-900 mb-2">
+                  📅 選択した日時
+                </p>
+                <p className="text-lg font-bold text-blue-900">
+                  {new Date(selectedBlock.date).toLocaleDateString('ja-JP', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    weekday: 'long'
+                  })}
+                </p>
+                <p className="text-lg font-bold text-blue-900 mt-1">
+                  {selectedBlock.startTime.slice(0, 5)} - {selectedBlock.endTime.slice(0, 5)}
+                </p>
+              </div>
+
+              {isOneTimeMode && (
+                <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200 mb-4">
+                  <p className="text-xs text-yellow-800 font-medium">
+                    ⚠️ ワンタイムリンク
+                  </p>
+                  <p className="text-xs text-yellow-700 mt-1">
+                    予約完了後、このリンクは無効化されます
+                  </p>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    お名前 *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={guestInfo.name}
+                    onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
+                    disabled={!!guestUser}
+                    className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                      guestUser ? 'bg-gray-100' : ''
+                    }`}
+                    placeholder="山田太郎"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    メールアドレス *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={guestInfo.email}
+                    onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
+                    disabled={!!guestUser}
+                    className={`w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                      guestUser ? 'bg-gray-100' : ''
+                    }`}
+                    placeholder="yamada@example.com"
+                  />
+                </div>
+
+                {guestUser && (
+                  <div className="bg-green-50 p-3 rounded-md border border-green-200">
+                    <p className="text-xs text-green-800 font-medium">
+                      ✅ Googleアカウント連携済み
+                    </p>
+                    <p className="text-xs text-green-700 mt-1">
+                      カレンダーに自動追加されます
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={cancelSelection}
+                    className="flex-1 px-4 py-3 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-md disabled:bg-gray-400 transition-colors"
+                  >
+                    {submitting ? '予約中...' : '予約を確定する'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
