@@ -223,50 +223,50 @@ const fetchSchedules = async (userId: string) => {
     router.push('/login')
   }
 
-  const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
-    try {
-      const response = await fetch('/api/one-time-token/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scheduleId })
-      })
+const copyOneTimeLink = async (shareLink: string, scheduleId: string) => {
+  try {
+    const response = await fetch('/api/one-time-token/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scheduleId })
+    })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Token creation failed')
-      }
-
-      const { token } = await response.json()
-      console.log('✅ One-time token created:', token)
-
-      let url = `${window.location.origin}/book/${shareLink}`
-      
-      if (quickGuestInfo.name && quickGuestInfo.email) {
-        const encodedName = encodeURIComponent(quickGuestInfo.name)
-        const encodedEmail = encodeURIComponent(quickGuestInfo.email)
-        url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}?token=${token}`
-      } else {
-        url = `${window.location.origin}/book/${shareLink}?token=${token}`
-      }
-      
-      navigator.clipboard.writeText(url)
-      
-      if (quickGuestInfo.name && quickGuestInfo.email) {
-        showToast(
-          `${quickGuestInfo.name}様専用ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n有効期限：24時間`,
-          'yellow'
-        )
-      } else {
-        showToast(
-          'ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n有効期限：24時間',
-          'yellow'
-        )
-      }
-    } catch (error) {
-      console.error('❌ Error creating one-time link:', error)
-      showToast('ワンタイムリンクの生成に失敗しました', 'yellow')
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || 'Token creation failed')
     }
+
+    const { token } = await response.json()
+    console.log('✅ One-time token created:', token)
+
+    let url = `${window.location.origin}/book/${shareLink}`
+    
+    if (quickGuestInfo.name && quickGuestInfo.email) {
+      const encodedName = encodeURIComponent(quickGuestInfo.name)
+      const encodedEmail = encodeURIComponent(quickGuestInfo.email)
+      url = `${window.location.origin}/book/${shareLink}/${encodedName}/${encodedEmail}?token=${token}`
+    } else {
+      url = `${window.location.origin}/book/${shareLink}?token=${token}`
+    }
+    
+    navigator.clipboard.writeText(url)
+    
+    if (quickGuestInfo.name && quickGuestInfo.email) {
+      showToast(
+        `${quickGuestInfo.name}様専用ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n有効期限：7日間`, // ⭐ 24時間 → 7日間
+        'yellow'
+      )
+    } else {
+      showToast(
+        'ワンタイムリンクをコピーしました！\n1回だけ予約可能なリンクです。\n有効期限：7日間', // ⭐ 24時間 → 7日間
+        'yellow'
+      )
+    }
+  } catch (error) {
+    console.error('❌ Error creating one-time link:', error)
+    showToast('ワンタイムリンクの生成に失敗しました', 'yellow')
   }
+}
 
   const copyFixedLink = (shareLink: string, isCandidateMode: boolean, isInterviewMode: boolean) => {
     let url

@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     if (data.expires_at && new Date(data.expires_at) < new Date()) {
       console.log('⚠️ Token expired:', token)
       return NextResponse.json(
-        { valid: false, message: 'このリンクは期限切れです（24時間経過）' },
+        { valid: false, message: 'このリンクは期限切れです（7日間経過）' },
         { status: 403 }
       )
     }

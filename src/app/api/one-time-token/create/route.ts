@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
         token,
         schedule_id: scheduleId,
         is_used: false,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24시간 후 만료
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
       })
       .select()
       .single()
