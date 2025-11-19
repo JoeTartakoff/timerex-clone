@@ -11,17 +11,13 @@ console.log('=== ENVIRONMENT INFO ===')
 console.log('NODE_ENV:', process.env.NODE_ENV)
 console.log('VERCEL:', process.env.VERCEL)
 console.log('VERCEL_ENV:', process.env.VERCEL_ENV)
-console.log('VERCEL_REGION:', process.env.VERCEL_REGION)
 console.log('Has GOOGLE_CLIENT_SECRET:', !!process.env.GOOGLE_CLIENT_SECRET)
-console.log('GOOGLE_CLIENT_SECRET length:', process.env.GOOGLE_CLIENT_SECRET?.length)
 console.log('Has NEXT_PUBLIC_GOOGLE_CLIENT_ID:', !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID)
 console.log('========================')
 
 async function refreshAccessToken(refreshToken: string): Promise<string | null> {
   try {
     console.log('🔄 Refreshing access token...')
-    console.log('🔄 Using client_id:', process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID?.substring(0, 20) + '...')
-    console.log('🔄 Has client_secret:', !!process.env.GOOGLE_CLIENT_SECRET)
     
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -173,9 +169,6 @@ async function getAvailableSlotsForTeam(
     )
 
     console.log('✅ Fetched slots for all team members')
-    console.log('📊 Raw results:', allMemberSlots.map((slots, i) => 
-      `Member ${i + 1}: ${slots ? slots.length : 'null'} slots`
-    ))
 
     const validSlots = allMemberSlots.filter(slots => slots !== null)
 
@@ -196,44 +189,24 @@ async function getAvailableSlotsForTeam(
 
     let commonSlots = validSlots[0]
     console.log(`   Step 0: Starting with ${commonSlots.length} slots from member 1`)
-    console.log(`   Sample slot:`, commonSlots[0])
 
     for (let i = 1; i < validSlots.length; i++) {
-      try {
-        const memberSlots = validSlots[i]
-        console.log(`\n   Step ${i}: Intersecting with member ${i + 1}`)
-        console.log(`   Member ${i + 1} has ${memberSlots.length} slots`)
-        console.log(`   Sample slot from member ${i + 1}:`, memberSlots[0])
-        
-        const beforeCount = commonSlots.length
-        
-        console.log(`   Starting filter operation...`)
-        
-        commonSlots = commonSlots.filter(commonSlot => {
-          const found = memberSlots.some(memberSlot =>
-            commonSlot.date === memberSlot.date &&
-            commonSlot.startTime === memberSlot.startTime &&
-            commonSlot.endTime === memberSlot.endTime
-          )
-          return found
-        })
-        
-        console.log(`   Filter completed!`)
-        console.log(`   Result: ${beforeCount} → ${commonSlots.length} common slots`)
-        
-        if (commonSlots.length > 0) {
-          console.log(`   Sample common slot:`, commonSlots[0])
-        } else {
-          console.log(`   ⚠️ No common slots remaining!`)
-        }
-        
-      } catch (error) {
-        console.error(`   ❌ Error in step ${i}:`, error)
-        throw error
-      }
+      const memberSlots = validSlots[i]
+      console.log(`   Step ${i}: Intersecting with member ${i + 1} (${memberSlots.length} slots)`)
+      
+      const beforeCount = commonSlots.length
+      
+      commonSlots = commonSlots.filter(commonSlot => {
+        return memberSlots.some(memberSlot =>
+          commonSlot.date === memberSlot.date &&
+          commonSlot.startTime === memberSlot.startTime &&
+          commonSlot.endTime === memberSlot.endTime
+        )
+      })
+      
+      console.log(`   Result: ${beforeCount} → ${commonSlots.length} common slots`)
     }
 
-    console.log(`\n✅ Loop completed successfully!`)
     console.log(`✅ FINAL: Team common slots = ${commonSlots.length}`)
     console.log('=== getAvailableSlotsForTeam COMPLETED ===\n')
 
@@ -278,27 +251,45 @@ export async function POST(request: Request) {
     console.log('✅ Schedule found:', schedule.title)
     console.log('Is team schedule:', !!schedule.team_id)
 
-    let hostSlots
-    
-    if (schedule.team_id) {
-      console.log('📅 Fetching team slots...')
-      hostSlots = await getAvailableSlotsForTeam(
-        schedule.team_id,
-        schedule.date_range_start,
-        schedule.date_range_end,
-        schedule.time_slot_duration
-      )
-    } else {
-      console.log('📅 Fetching host slots...')
-      hostSlots = await getAvailableSlotsForUser(
-        schedule.user_id,
-        schedule.date_range_start,
-        schedule.date_range_end,
-        schedule.time_slot_duration
-      )
-    }
+    // ⭐ 병렬 처리로 속도 개선!
+    console.log('🚀 Starting parallel fetch...')
+    const startTime = Date.now()
+
+    const [hostSlots, guestSlots, bookingsResult] = await Promise.all([
+      schedule.team_id 
+        ? getAvailableSlotsForTeam(
+            schedule.team_id,
+            schedule.date_range_start,
+            schedule.date_range_end,
+            schedule.time_slot_duration
+          )
+        : getAvailableSlotsForUser(
+            schedule.user_id,
+            schedule.date_range_start,
+            schedule.date_range_end,
+            schedule.time_slot_duration
+          ),
+      guestUserId 
+        ? getAvailableSlotsForUser(
+            guestUserId,
+            schedule.date_range_start,
+            schedule.date_range_end,
+            schedule.time_slot_duration
+          )
+        : Promise.resolve(null),
+      supabaseAdmin
+        .from('bookings')
+        .select('booking_date, start_time, end_time')
+        .eq('schedule_id', scheduleId)
+        .eq('status', 'confirmed')
+    ])
+
+    const parallelTime = Date.now() - startTime
+    console.log(`⚡ Parallel fetch completed in ${parallelTime}ms`)
 
     console.log('📊 Host/Team slots result:', hostSlots ? `${hostSlots.length} slots` : 'null')
+    console.log('📊 Guest slots result:', guestSlots ? `${guestSlots.length} slots` : 'not logged in')
+    console.log('📊 Bookings result:', bookingsResult.data?.length || 0)
 
     if (!hostSlots) {
       console.log('❌ Failed to get slots')
@@ -311,105 +302,26 @@ export async function POST(request: Request) {
 
     let finalSlots = hostSlots
 
-    if (guestUserId) {
-      console.log('👤 Guest logged in, fetching guest slots...')
+    if (guestSlots) {
+      console.log('🔍 Calculating intersection...')
+      const beforeCount = hostSlots.length
       
-      const guestSlots = await getAvailableSlotsForUser(
-        guestUserId,
-        schedule.date_range_start,
-        schedule.date_range_end,
-        schedule.time_slot_duration
-      )
-
-      console.log('📊 Guest slots result:', guestSlots ? `${guestSlots.length} slots` : 'null')
-
-      if (guestSlots) {
-        console.log('🔍 Calculating intersection...')
-        const beforeCount = hostSlots.length
-        
-        finalSlots = hostSlots.filter(hostSlot => 
-          guestSlots.some(guestSlot => 
-            hostSlot.date === guestSlot.date &&
-            hostSlot.startTime === guestSlot.startTime &&
-            hostSlot.endTime === guestSlot.endTime
-          )
+      finalSlots = hostSlots.filter(hostSlot => 
+        guestSlots.some(guestSlot => 
+          hostSlot.date === guestSlot.date &&
+          hostSlot.startTime === guestSlot.startTime &&
+          hostSlot.endTime === guestSlot.endTime
         )
-        
-        console.log(`✅ Intersection: ${beforeCount} host/team + ${guestSlots.length} guest = ${finalSlots.length} common slots`)
-      } else {
-        console.log('⚠️ Failed to get guest slots, using host/team slots only')
-      }
-    }
-
-    console.log('📊 Fetching existing bookings...')
-    const { data: bookings, error: bookingsError } = await supabaseAdmin
-      .from('bookings')
-      .select('booking_date, start_time, end_time, host_calendar_event_id, assigned_user_id')
-      .eq('schedule_id', scheduleId)
-      .eq('status', 'confirmed')
-
-    if (bookingsError) {
-      console.error('⚠️ Bookings error:', bookingsError)
-    } else {
-      console.log(`📊 Found ${bookings?.length || 0} existing bookings`)
-    }
-
-    let validBookings: any[] = []
-    if (bookings && bookings.length > 0) {
-      console.log('🔍 Checking calendar events existence...')
+      )
       
-      for (const booking of bookings) {
-        console.log('📝 Processing booking:', booking)
-        
-        if (booking.host_calendar_event_id) {
-          try {
-            const userId = booking.assigned_user_id || schedule.user_id
-            
-            const { data: userTokens } = await supabaseAdmin
-              .from('user_tokens')
-              .select('access_token')
-              .eq('user_id', userId)
-              .single()
-
-            if (userTokens?.access_token) {
-              const eventResponse = await fetch(
-                `https://www.googleapis.com/calendar/v3/calendars/primary/events/${booking.host_calendar_event_id}`,
-                {
-                  headers: {
-                    'Authorization': `Bearer ${userTokens.access_token}`,
-                  },
-                }
-              )
-
-              console.log('🔎 Event check response status:', eventResponse.status)
-
-              if (eventResponse.ok) {
-                const eventData = await eventResponse.json()
-                
-                if (eventData.status !== 'cancelled') {
-                  console.log('✅ Event exists:', booking.host_calendar_event_id)
-                  validBookings.push(booking)
-                } else {
-                  console.log('⚠️ Event cancelled:', booking.host_calendar_event_id)
-                }
-              } else {
-                console.log('⚠️ Event not found (status ' + eventResponse.status + '):', booking.host_calendar_event_id)
-              }
-            } else {
-              validBookings.push(booking)
-            }
-          } catch (error) {
-            console.log('⚠️ Error checking event:', error)
-            validBookings.push(booking)
-          }
-        } else {
-          validBookings.push(booking)
-        }
-      }
+      console.log(`✅ Intersection: ${beforeCount} host/team + ${guestSlots.length} guest = ${finalSlots.length} common slots`)
     }
 
-    console.log(`✅ Valid bookings: ${validBookings.length} / ${bookings?.length || 0}`)
+    // ⭐ 캘린더 확인 제거! DB만 신뢰!
+    const validBookings = bookingsResult.data || []
+    console.log(`✅ Using ${validBookings.length} confirmed bookings from DB`)
 
+    // 예약된 시간 제외
     const availableSlots = finalSlots.filter(slot => {
       return !validBookings.some(
         booking =>
@@ -420,6 +332,9 @@ export async function POST(request: Request) {
     })
 
     console.log(`✅ Final available slots: ${availableSlots.length}`)
+    
+    const totalTime = Date.now() - startTime
+    console.log(`⏱️ Total API time: ${totalTime}ms`)
     console.log('=== API COMPLETED SUCCESSFULLY ===')
 
     return NextResponse.json({ 
@@ -430,11 +345,12 @@ export async function POST(request: Request) {
       debug: {
         environment: process.env.VERCEL_ENV || 'local',
         hostSlotsCount: hostSlots.length,
-        guestSlotsCount: guestUserId ? (finalSlots.length === hostSlots.length ? 0 : 'calculated') : 'not logged in',
-        bookingsCount: bookings?.length || 0,
-        validBookingsCount: validBookings.length,
+        guestSlotsCount: guestSlots?.length || 0,
+        bookingsCount: validBookings.length,
         finalSlotsCount: availableSlots.length,
         isTeamSchedule: !!schedule.team_id,
+        executionTimeMs: totalTime,
+        parallelFetchTimeMs: parallelTime,
       }
     })
   } catch (error: unknown) {

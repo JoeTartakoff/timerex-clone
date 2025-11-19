@@ -1,36 +1,6 @@
 import { CalendarEvent, TimeSlot } from '@/types/calendar'
 
-// 모든 캘린더 목록 가져오기
-async function fetchAllCalendars(accessToken: string): Promise<string[]> {
-  try {
-    const response = await fetch(
-      'https://www.googleapis.com/calendar/v3/users/me/calendarList',
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    )
-
-    if (!response.ok) {
-      console.error('Failed to fetch calendar list:', response.status)
-      return ['primary']
-    }
-
-    const data = await response.json()
-    const calendarIds = data.items
-      ?.filter((cal: any) => cal.selected !== false)
-      ?.map((cal: any) => cal.id) || ['primary']
-
-    console.log('📋 Found calendars:', calendarIds.length)
-    return calendarIds
-  } catch (error) {
-    console.error('Error fetching calendar list:', error)
-    return ['primary']
-  }
-}
-
-// 특정 캘린더에서 이벤트 가져오기
+// ⭐ Primary 캘린더에서 이벤트 가져오기 (다른 캘린더 무시!)
 async function fetchEventsFromCalendar(
   accessToken: string,
   calendarId: string,
@@ -114,36 +84,29 @@ async function fetchEventsFromCalendar(
   return allEvents
 }
 
-// Google Calendar API로 모든 캘린더의 일정 가져오기
+// ⭐ Primary 캘린더만 조회 (최적화!)
 export async function fetchCalendarEvents(
   accessToken: string,
   timeMin: string,
   timeMax: string
 ): Promise<CalendarEvent[]> {
-  console.log('📅 Starting to fetch calendar events from all calendars...')
+  console.log('📅 Fetching events from PRIMARY calendar only (optimized)...')
   console.log('📅 Time range:', { timeMin, timeMax })
 
   try {
-    const calendarIds = await fetchAllCalendars(accessToken)
-    console.log(`📋 Total calendars to check: ${calendarIds.length}`)
-
-    const allEventsPromises = calendarIds.map(calendarId =>
-      fetchEventsFromCalendar(accessToken, calendarId, timeMin, timeMax)
+    // ⭐ Primary 캘린더만 조회! 다른 캘린더 무시!
+    const primaryEvents = await fetchEventsFromCalendar(
+      accessToken, 
+      'primary', 
+      timeMin, 
+      timeMax
     )
 
-    const allEventsArrays = await Promise.all(allEventsPromises)
-    const allEvents = allEventsArrays.flat()
-
-    const uniqueEvents = Array.from(
-      new Map(allEvents.map(event => [event.id, event])).values()
-    )
-
-    console.log(`✅ Total unique events fetched: ${uniqueEvents.length}`)
-    return uniqueEvents
+    console.log(`✅ Total events fetched: ${primaryEvents.length}`)
+    return primaryEvents
   } catch (error) {
     console.error('❌ Error in fetchCalendarEvents:', error)
-    console.log('⚠️ Falling back to primary calendar only')
-    return fetchEventsFromCalendar(accessToken, 'primary', timeMin, timeMax)
+    return []
   }
 }
 
