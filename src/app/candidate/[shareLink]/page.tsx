@@ -105,6 +105,27 @@ export default function CandidatePage() {
     }
   }, [shareLink])
 
+  // ⭐ 빈 시간이 있는 최단 날짜로 자동 이동
+  const checkAndMoveToFirstAvailableDate = (slots: Array<{date: string, startTime: string, endTime: string}>) => {
+    if (!slots || slots.length === 0) {
+      console.log('📅 No candidate slots available')
+      return
+    }
+    
+    const sortedSlots = [...slots].sort((a, b) => a.date.localeCompare(b.date))
+    const firstAvailableDate = new Date(sortedSlots[0].date)
+    
+    const dateStr = firstAvailableDate.toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'short'
+    })
+    
+    console.log(`📅 First available date: ${dateStr}`)
+    setStartDate(firstAvailableDate)
+  }
+
   const loadSchedule = async () => {
     try {
       console.log('📋 Loading schedule info...')
@@ -122,8 +143,13 @@ export default function CandidatePage() {
       setSchedule(data)
       setLoading(false)
 
-      const today = new Date()
-      setStartDate(today)
+      // ⭐ 후보 시간이 있는 최단 날짜로 자동 이동
+      if (data.candidate_slots && data.candidate_slots.length > 0) {
+        checkAndMoveToFirstAvailableDate(data.candidate_slots)
+      } else {
+        const today = new Date()
+        setStartDate(today)
+      }
     } catch (error) {
       console.error('Error loading schedule:', error)
       alert('スケジュールの読み込みに失敗しました')

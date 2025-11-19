@@ -131,6 +131,31 @@ export default function BookingPage() {
     }
   }
 
+  // ⭐ 빈 시간이 있는 최단 날짜로 자동 이동하는 함수 (수정!)
+  const checkAndMoveToFirstAvailableDate = (slots: AvailabilitySlot[]) => {
+    if (!slots || slots.length === 0) {
+      console.log('📅 No slots available')
+      return
+    }
+    
+    // ⭐ 가장 빠른 날짜 찾기 (무조건!)
+    const sortedSlots = [...slots].sort((a, b) => a.date.localeCompare(b.date))
+    const firstAvailableDate = new Date(sortedSlots[0].date)
+    
+    const dateStr = firstAvailableDate.toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'short'
+    })
+    
+    console.log(`📅 First available date: ${dateStr}`)
+    console.log(`📅 Setting start date to: ${sortedSlots[0].date}`)
+    
+    // ⭐ 무조건 가장 빠른 날짜로 설정!
+    setStartDate(firstAvailableDate)
+  }
+
   const fetchCalendarSlots = async (scheduleData: Schedule, guestUserId?: string) => {
     try {
       console.log('📅 Fetching calendar slots...')
@@ -155,9 +180,14 @@ export default function BookingPage() {
             start_time: slot.startTime,
             end_time: slot.endTime,
           }))
+          
           console.log('✅ Using Calendar API slots:', slotsWithId.length)
           setAvailableSlots(slotsWithId)
           setIsLoadingSlots(false)
+          
+          // ⭐ 빈 시간이 있는 최단 날짜로 자동 이동
+          checkAndMoveToFirstAvailableDate(slotsWithId)
+          
           return
         }
       }
@@ -178,6 +208,11 @@ export default function BookingPage() {
       } else {
         console.log('✅ Loaded static slots:', slotsData?.length || 0)
         setAvailableSlots(slotsData || [])
+        
+        // ⭐ 정적 슬롯에서도 자동 이동
+        if (slotsData && slotsData.length > 0) {
+          checkAndMoveToFirstAvailableDate(slotsData)
+        }
       }
       
       setIsLoadingSlots(false)
@@ -658,7 +693,6 @@ export default function BookingPage() {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* 헤더 박스 */}
         <div className="bg-white shadow rounded-lg p-6 mb-6">
           <div className="flex items-start justify-between mb-4">
             <div className="flex-1">
@@ -722,7 +756,6 @@ export default function BookingPage() {
           </div>
         </div>
 
-        {/* 안내 메시지 */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-blue-800">
             📌 カレンダーで時間をクリックして予約してください
@@ -732,7 +765,6 @@ export default function BookingPage() {
           </p>
         </div>
 
-        {/* 캘린더 박스 */}
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <button
@@ -902,7 +934,6 @@ export default function BookingPage() {
         </div>
       </div>
 
-      {/* ⭐ 예약 확인 팝업 */}
       {showPopup && selectedBlock && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">

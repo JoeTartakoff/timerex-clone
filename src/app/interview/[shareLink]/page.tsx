@@ -104,6 +104,24 @@ export default function InterviewPage() {
     }
   }, [shareLink])
 
+  // ⭐ 예약 가능한 최단 날짜로 자동 이동
+  const checkAndMoveToFirstAvailableDate = (scheduleData: Schedule) => {
+    if (!scheduleData) return
+    
+    // 스케줄 시작 날짜로 이동
+    const firstDate = new Date(scheduleData.date_range_start)
+    
+    const dateStr = firstDate.toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'short'
+    })
+    
+    console.log(`📅 First available date: ${dateStr}`)
+    setStartDate(firstDate)
+  }
+
   const loadSchedule = async () => {
     try {
       console.log('📋 Loading schedule info...')
@@ -121,8 +139,8 @@ export default function InterviewPage() {
       setSchedule(data)
       setLoading(false)
 
-      const today = new Date()
-      setStartDate(today)
+      // ⭐ 스케줄 시작 날짜로 자동 이동
+      checkAndMoveToFirstAvailableDate(data)
     } catch (error) {
       console.error('Error loading schedule:', error)
       alert('スケジュールの読み込みに失敗しました')
