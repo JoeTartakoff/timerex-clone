@@ -75,7 +75,7 @@ async function fetchEventsFromCalendar(
       
       console.log(`📄 Calendar ${calendarId} - Page ${pageCount}: ${pageEvents.length} events`)
       
-      // ⭐ 하루 종일 이벤트 필터링 추가
+      // ⭐ 하루 종일 이벤트 필터링
       const formattedEvents = pageEvents
         .filter((item: any) => {
           // dateTime이 있으면 일반 이벤트 → 사용
@@ -94,7 +94,7 @@ async function fetchEventsFromCalendar(
         .map((item: any) => ({
           id: item.id,
           summary: item.summary || '予定',
-          start: item.start.dateTime,  // ⭐ 이제 항상 dateTime
+          start: item.start.dateTime,
           end: item.end.dateTime,
         }))
       
@@ -147,25 +147,11 @@ export async function fetchCalendarEvents(
   }
 }
 
-// ⭐ 날짜 문자열을 Asia/Tokyo 기준 Date 객체로 변환
+// ⭐ Tokyo 타임존을 명시적으로 지정하여 Date 객체 생성
 function parseTokyoDate(dateStr: string, timeStr: string): Date {
-  // YYYY-MM-DDTHH:mm:ss 형식으로 조합
-  const isoString = `${dateStr}T${timeStr}`
-  
-  // 먼저 로컬 Date 객체 생성
-  const localDate = new Date(isoString)
-  
-  // 로컬 타임존 오프셋 (분 단위)
-  const localOffset = localDate.getTimezoneOffset()
-  
-  // Asia/Tokyo 오프셋 (UTC+9 = -540분)
-  const tokyoOffset = -540
-  
-  // 오프셋 차이를 보정
-  const offsetDiff = tokyoOffset - localOffset
-  
-  // 보정된 시간 반환
-  return new Date(localDate.getTime() + offsetDiff * 60 * 1000)
+  // +09:00 (Tokyo 타임존) 명시
+  const isoString = `${dateStr}T${timeStr}+09:00`
+  return new Date(isoString)
 }
 
 // 빈 시간대 계산
@@ -191,7 +177,7 @@ export function calculateAvailableSlots(
   for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
     const dateStr = date.toISOString().split('T')[0]
     
-    // ⭐ Asia/Tokyo 기준으로 해당 날짜의 시작과 끝 계산
+    // ⭐ Tokyo 타임존으로 해당 날짜의 시작과 끝 계산
     const dayStart = parseTokyoDate(dateStr, '00:00:00')
     const dayEnd = parseTokyoDate(dateStr, '23:59:59')
     
@@ -231,9 +217,11 @@ export function calculateAvailableSlots(
       slotDuration
     )
 
+    console.log(`  Generated ${slots.length} time slots`)
+
     // 이벤트와 겹치지 않는 슬롯만 추가
     slots.forEach(slot => {
-      // ⭐ 슬롯 시간을 Asia/Tokyo 기준으로 파싱
+      // ⭐ 슬롯 시간을 Tokyo 타임존으로 파싱
       const slotStart = parseTokyoDate(slot.date, slot.startTime)
       const slotEnd = parseTokyoDate(slot.date, slot.endTime)
 
@@ -251,6 +239,10 @@ export function calculateAvailableSlots(
           (slotEndMs > eventStartMs && slotEndMs <= eventEndMs) ||
           (slotStartMs <= eventStartMs && slotEndMs >= eventEndMs)
         )
+
+        if (overlaps) {
+          console.log(`    ❌ Slot ${slot.startTime}-${slot.endTime} conflicts with ${event.summary}`)
+        }
 
         return overlaps
       })
@@ -285,6 +277,7 @@ function generateTimeSlots(
   while (current + duration <= end) {
     const slotEnd = current + duration
 
+    // 점심시간과 겹치는지 확인
     const overlapLunch = (
       (current >= lunchStartMin && current < lunchEndMin) ||
       (slotEnd > lunchStartMin && slotEnd <= lunchEndMin) ||
@@ -299,17 +292,19 @@ function generateTimeSlots(
       })
     }
 
-    current += 30  // ✅ 수정! 항상 30분씩 점프!
+    current += 30  // 항상 30분씩 증가
   }
 
   return slots
 }
 
+// 시간 문자열을 분 단위로 변환
 function parseTime(time: string): number {
   const [hours, minutes] = time.split(':').map(Number)
   return hours * 60 + minutes
 }
 
+// 분 단위를 시간 문자열로 변환
 function formatTime(minutes: number): string {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
